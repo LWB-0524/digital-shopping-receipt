@@ -83,7 +83,11 @@ export function getClient(): Anthropic {
   return client;
 }
 
-export async function recognizeReceipt(images: UploadImage[], today: string): Promise<RecognizeResult> {
+export async function recognizeReceipt(
+  images: UploadImage[],
+  today: string,
+  knownStores: string[] = [],
+): Promise<RecognizeResult> {
   if (process.env.RECOGNIZE_MOCK === "1") return mockResult(today);
 
   let response: Anthropic.Beta.BetaMessage;
@@ -107,7 +111,17 @@ export async function recognizeReceipt(images: UploadImage[], today: string): Pr
               type: "image" as const,
               source: { type: "base64" as const, media_type: img.media_type, data: img.data },
             })),
-            { type: "text", text: `今天是 ${today}。请识别这张小票。` },
+            {
+              type: "text",
+              text: [
+                `今天是 ${today}。请识别这张小票。`,
+                knownStores.length > 0
+                  ? `我以前去过这些店铺：${knownStores.join("；")}。如果这张小票来自其中某一家（哪怕小票上的写法、语言或分店名不同），store 请直接使用这里的写法。`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
           ],
         },
       ],

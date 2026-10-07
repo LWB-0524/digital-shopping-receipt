@@ -61,4 +61,5 @@ export type StoreSummary = {
   total: number;
   last: string; // 最近一次购买时间
   names: string[]; // 小票上出现过的原始写法
+  custom: boolean; // 是否包含用户手动合并的店名
 };

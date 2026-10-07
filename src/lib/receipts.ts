@@ -2,7 +2,7 @@ import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
 import { getDb } from "./db";
-import { normalizeStore } from "./stores";
+import { canonicalStore } from "./stores";
 import type {
   ItemRow,
   MonthlyStats,
@@ -19,7 +19,7 @@ export type Filters = {
   q?: string;
   group?: string;
   category?: string;
-  store?: string; // 合并后的店铺名，见 normalizeStore
+  store?: string; // 合并后的店铺名，见 canonicalStore
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -42,8 +42,11 @@ export function filtersFromSearchParams(params: URLSearchParams): Filters {
 async function storeCondition(userId: number, store: string | undefined, args: InArgs & unknown[]): Promise<string[]> {
   if (!store) return [];
   const db = await getDb();
-  const rs = await db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] });
-  const variants = rs.rows.map((r) => String(r.store ?? "")).filter((name) => normalizeStore(name) === store);
+  const [rs, aliases] = await Promise.all([
+    db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
+    loadStoreAliases(userId),
+  ]);
+  const variants = rs.rows.map((r) => String(r.store ?? "")).filter((name) => canonicalStore(name, aliases) === store);
   if (variants.length === 0) return ["0"];
   args.push(...variants);
   return [`r.store IN (${variants.map(() => "?").join(",")})`];
@@ -374,6 +377,7 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     receipts: selected.receipts,
     categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
     stores: mergeStores(
+      await loadStoreAliases(userId),
       stores.rows.map((r) => ({
         name: String(r.store ?? ""),
         visits: Number(r.visits),
@@ -455,6 +459,7 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
     args,
   });
   return mergeStores(
+    await loadStoreAliases(userId),
     rs.rows.map((r) => ({
       name: String(r.store ?? ""),
       visits: Number(r.visits),
@@ -464,11 +469,15 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
   );
 }
 
-export function mergeStores(rows: { name: string; visits: number; total: number; last: string }[]): StoreSummary[] {
+export function mergeStores(
+  aliases: Map<string, string>,
+  rows: { name: string; visits: number; total: number; last: string }[],
+): StoreSummary[] {
   const merged = new Map<string, StoreSummary>();
   for (const r of rows) {
-    const key = normalizeStore(r.name);
-    const cur = merged.get(key) ?? { store: key, visits: 0, total: 0, last: "", names: [] };
+    const key = canonicalStore(r.name, aliases);
+    const cur = merged.get(key) ?? { store: key, visits: 0, total: 0, last: "", names: [], custom: false };
+    if (aliases.has(r.name)) cur.custom = true;
     cur.visits += r.visits;
     cur.total += r.total;
     if (r.last > cur.last) cur.last = r.last;
@@ -476,4 +485,37 @@ export function mergeStores(rows: { name: string; visits: number; total: number;
     merged.set(key, cur);
   }
   return [...merged.values()].sort((a, b) => b.total - a.total);
+}
+
+export async function loadStoreAliases(userId: number): Promise<Map<string, string>> {
+  const db = await getDb();
+  const rs = await db.execute({ sql: "SELECT name, canonical FROM store_aliases WHERE user_id = ?", args: [userId] });
+  return new Map(rs.rows.map((r) => [String(r.name), String(r.canonical)]));
+}
+
+// 把若干家店合并成一家：这些店（含它们已合并的各种写法）的原始店名都指向 canonical
+export async function mergeStoreNames(userId: number, stores: string[], canonical: string): Promise<number> {
+  const db = await getDb();
+  const [rs, aliases] = await Promise.all([
+    db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
+    loadStoreAliases(userId),
+  ]);
+  const wanted = new Set(stores);
+  const names = rs.rows.map((r) => String(r.store ?? "")).filter((n) => wanted.has(canonicalStore(n, aliases)));
+  if (names.length === 0) return 0;
+  await db.batch(
+    names.map((name) => ({
+      sql: `INSERT INTO store_aliases (user_id, name, canonical) VALUES (?, ?, ?)
+            ON CONFLICT(user_id, name) DO UPDATE SET canonical = excluded.canonical`,
+      args: [userId, name, canonical],
+    })),
+    "write",
+  );
+  return names.length;
+}
+
+// 取消手动合并，恢复按自动规则显示
+export async function unmergeStore(userId: number, canonical: string): Promise<void> {
+  const db = await getDb();
+  await db.execute({ sql: "DELETE FROM store_aliases WHERE user_id = ? AND canonical = ?", args: [userId, canonical] });
 }

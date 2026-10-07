@@ -55,6 +55,14 @@ const SCHEMA = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, name)
   )`,
+  // 用户手动合并的店铺：小票上的原始店名 → 合并后显示的店铺名。只影响显示和统计，不改小票数据。
+  `CREATE TABLE IF NOT EXISTS store_aliases (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    canonical TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, name)
+  )`,
 ];
 
 // 后来新增的列。只做 ADD COLUMN，不改动已有数据；已存在的列会跳过。
