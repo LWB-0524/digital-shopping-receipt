@@ -2,7 +2,6 @@ import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
 import { getDb } from "./db";
-import { resolveStoreNames } from "./stores";
 import type {
   ItemRow,
   MonthlyStats,
@@ -19,7 +18,7 @@ export type Filters = {
   q?: string;
   group?: string;
   category?: string;
-  store?: string; // 合并后的店铺名，见 resolveStoreNames
+  store?: string; // 店铺名：手动合并过的用合并后的名称，否则就是小票上的店名
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -465,14 +464,19 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
   );
 }
 
-// 店名解析：基于该用户全部小票计算，保证不同日期范围下同一家店的名字一致
+// 每个原始店名显示成什么：手动合并过的用合并后的名称，其余保持原样
 async function storeNames(userId: number): Promise<{ names: Map<string, string>; aliases: Map<string, string> }> {
   const db = await getDb();
   const [rs, aliases] = await Promise.all([
     db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
     loadStoreAliases(userId),
   ]);
-  return { names: resolveStoreNames(rs.rows.map((r) => String(r.store ?? "")), aliases), aliases };
+  const names = new Map<string, string>();
+  for (const r of rs.rows) {
+    const raw = String(r.store ?? "");
+    names.set(raw, aliases.get(raw) ?? raw);
+  }
+  return { names, aliases };
 }
 
 function mergeStores(

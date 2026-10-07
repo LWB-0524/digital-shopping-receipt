@@ -1,49 +1,28 @@
-// 同一家店在不同小票上的写法可能略有不同，例如
-// "PAK'nSAVE Wairau" 和 "PAK'nSAVE Wairau（Glenfield）"。
-// 去掉末尾括号里的补充说明、合并多余空格后作为"店铺"统计。只用于显示和筛选，不改动原始数据。
-export function normalizeStore(store: string): string {
-  const name = store
+// 店铺名称规则：一律按小票上的原样显示，只有用户手动合并过的店才算作一家（见 store_aliases 表）。
+// 下面的函数只用来给出"可能是同一家"的建议，不会自动合并。
+
+// 去掉末尾括号里的地址/分店说明，用于判断两个写法是否只差括号部分
+function baseName(store: string): string {
+  return store
     .replace(/\s*[（(][^（）()]*[）)]\s*$/u, "")
     .replace(/\s+/g, " ")
-    .trim();
-  return name || store.trim() || "未命名商店";
+    .trim()
+    .toLowerCase();
 }
 
-// 先看用户有没有手动合并过，没有再用自动规则
-export function canonicalStore(store: string, aliases?: Map<string, string>): string {
-  return aliases?.get(store) ?? normalizeStore(store);
-}
-
-// 算出每个原始店名最终显示成什么。只有确实有多种写法要合并时才去掉括号，
-// 只有一种写法的店保留小票上的完整名称（如带地址的分店名）。
-export function resolveStoreNames(rawNames: string[], aliases: Map<string, string>): Map<string, string> {
-  const groups = new Map<string, string[]>();
-  for (const raw of new Set(rawNames)) {
-    const key = canonicalStore(raw, aliases);
-    groups.set(key, [...(groups.get(key) ?? []), raw]);
-  }
-  const result = new Map<string, string>();
-  for (const [key, raws] of groups) {
-    const keepOriginal = raws.length === 1 && !aliases.has(raws[0]);
-    for (const raw of raws) result.set(raw, keepOriginal ? raw : key);
-  }
-  return result;
-}
-
-// 店名里的品牌词：第一个英文单词（跳过 supermarket 这类通用词），用来提示"可能是同一家"
+// 店名里的品牌词：第一个英文单词（跳过 supermarket 这类通用词）
 const GENERIC_WORDS = new Set(["the", "new", "nz", "supermarket", "store", "shop", "market", "mart"]);
 
-export function brandKey(store: string): string | null {
+function brandKey(store: string): string | null {
   const words = store.toLowerCase().match(/[a-z][a-z'’&]+/g) ?? [];
-  const word = words.find((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
-  return word ?? null;
+  return words.find((w) => w.length >= 3 && !GENERIC_WORDS.has(w)) ?? null;
 }
 
-// 找出品牌词相同、但还没合并成一家的店铺
+// 找出品牌词相同（没有英文时看去掉括号后的名称是否相同）、但还没合并成一家的店铺
 export function suggestStoreMerges(stores: { store: string }[]): string[][] {
   const groups = new Map<string, string[]>();
   for (const s of stores) {
-    const key = brandKey(s.store);
+    const key = brandKey(s.store) ?? baseName(s.store);
     if (key) groups.set(key, [...(groups.get(key) ?? []), s.store]);
   }
   return [...groups.values()].filter((g) => g.length > 1);
