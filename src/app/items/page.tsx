@@ -112,7 +112,7 @@ function ItemsView() {
                           style={{ width: `${Math.max(2, (c.amount / max) * 100)}%` }}
                         />
                       </span>
-                      <span className="tabular w-16 text-right">{money(c.amount)}</span>
+                      <span className="tabular w-24 text-right">{money(c.amount)}</span>
                     </button>
                   ))}
                 </div>

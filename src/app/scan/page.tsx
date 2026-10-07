@@ -4,13 +4,14 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
-import { api, localDateTime } from "@/lib/format";
+import { api, ApiError, localDateTime, money } from "@/lib/format";
 import { compressImage } from "@/lib/image";
 import type { ReceiptInput, RecognizeResult, UploadImage } from "@/lib/types";
 
 const MAX_IMAGES = 4;
 
 type Photo = UploadImage & { previewUrl: string };
+type DuplicateInfo = { id: number; store: string; purchased_at: string; total: number };
 
 export default function ScanPage() {
   const router = useRouter();
@@ -57,12 +58,22 @@ export default function ScanPage() {
     }
   }
 
-  async function save(receipt: ReceiptInput) {
-    const { id } = await api<{ id: number }>("/api/receipts", {
-      method: "POST",
-      body: JSON.stringify({ receipt, images: photos.map(({ media_type, data }) => ({ media_type, data })) }),
-    });
-    router.replace(`/receipts/${id}`);
+  async function save(receipt: ReceiptInput, force = false): Promise<void> {
+    try {
+      const { id } = await api<{ id: number }>("/api/receipts", {
+        method: "POST",
+        body: JSON.stringify({ receipt, images: photos.map(({ media_type, data }) => ({ media_type, data })), force }),
+      });
+      router.replace(`/receipts/${id}`);
+    } catch (err) {
+      const dup = err instanceof ApiError && err.status === 409 ? (err.data.duplicate as DuplicateInfo) : null;
+      if (!dup) throw err;
+      const ok = confirm(
+        `已经有一张很像的小票：\n${dup.store || "未命名商店"}\n${dup.purchased_at}\n${money(dup.total)}\n\n可能是重复拍了。仍然要保存吗？`,
+      );
+      if (!ok) throw new Error(`没有保存。已有的那张小票可以在首页找到（${dup.purchased_at.slice(0, 10)}）`);
+      return save(receipt, true);
+    }
   }
 
   if (draft) {
@@ -73,7 +84,7 @@ export default function ScanPage() {
           initial={draft.receipt}
           warnings={draft.warnings}
           submitLabel="保存小票"
-          onSubmit={save}
+          onSubmit={(r) => save(r)}
           onCancel={() => setDraft(null)}
         />
       </AppShell>

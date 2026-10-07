@@ -346,3 +346,55 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
   };
 }
+
+export type DuplicateCandidate = { id: number; store: string; purchased_at: string; total: number };
+
+// 同一天、金额相同的小票视为可能重复（拍了两次、或者识别时间有一两分钟偏差）
+export async function findDuplicate(
+  userId: number,
+  input: { purchased_at: string; total: number },
+  excludeId?: number,
+): Promise<DuplicateCandidate | null> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `SELECT id, store, purchased_at, total FROM receipts
+          WHERE user_id = ? AND substr(purchased_at, 1, 10) = ? AND abs(total - ?) < 0.005 AND id != ?
+          ORDER BY abs(julianday(purchased_at) - julianday(?)) LIMIT 1`,
+    args: [userId, input.purchased_at.slice(0, 10), input.total, excludeId ?? 0, input.purchased_at],
+  });
+  const row = rs.rows[0];
+  return row
+    ? { id: Number(row.id), store: String(row.store ?? ""), purchased_at: String(row.purchased_at), total: Number(row.total) }
+    : null;
+}
+
+// 查找现有数据里可能重复的小票，按 日期 + 金额 分组
+export async function listDuplicateGroups(userId: number): Promise<(DuplicateCandidate & { item_count: number })[][]> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `SELECT r.id, r.store, r.purchased_at, r.total,
+            (SELECT COUNT(*) FROM receipt_items i WHERE i.receipt_id = r.id) AS item_count,
+            substr(r.purchased_at, 1, 10) || '|' || CAST(round(r.total * 100) AS INTEGER) AS k
+          FROM receipts r
+          WHERE r.user_id = ? AND (substr(r.purchased_at, 1, 10) || '|' || CAST(round(r.total * 100) AS INTEGER)) IN (
+            SELECT substr(purchased_at, 1, 10) || '|' || CAST(round(total * 100) AS INTEGER) AS k2
+            FROM receipts WHERE user_id = ? GROUP BY k2 HAVING COUNT(*) > 1)
+          ORDER BY r.purchased_at DESC, r.id`,
+    args: [userId, userId],
+  });
+  const groups = new Map<string, (DuplicateCandidate & { item_count: number })[]>();
+  for (const row of rs.rows) {
+    const k = String(row.k);
+    groups.set(k, [
+      ...(groups.get(k) ?? []),
+      {
+        id: Number(row.id),
+        store: String(row.store ?? ""),
+        purchased_at: String(row.purchased_at),
+        total: Number(row.total),
+        item_count: Number(row.item_count),
+      },
+    ]);
+  }
+  return [...groups.values()];
+}

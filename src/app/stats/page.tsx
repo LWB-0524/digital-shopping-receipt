@@ -134,7 +134,7 @@ function CategoryCard({ stats }: { stats: MonthlyStats }) {
                 <span className="size-2.5 shrink-0 rounded-full" style={{ background: GROUP_COLORS[g.group] }} />
                 <span className="flex-1 whitespace-nowrap">{g.group}</span>
                 <span className="tabular text-muted">{percent(g.amount, sum)}</span>
-                <span className="tabular w-20 text-right">{money(g.amount)}</span>
+                <span className="tabular w-24 text-right">{money(g.amount)}</span>
               </li>
             ))}
           </ul>
@@ -142,7 +142,7 @@ function CategoryCard({ stats }: { stats: MonthlyStats }) {
           <h3 className="mt-5 mb-2 text-sm text-muted">小类明细</h3>
           <ul className="space-y-1.5">
             {stats.categories.map((c) => (
-              <li key={c.category} className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2 text-sm">
+              <li key={c.category} className="grid grid-cols-[4.5rem_1fr_6rem] items-center gap-2 text-sm">
                 <span className="truncate text-muted">{c.category}</span>
                 <span className="h-2 overflow-hidden rounded-full bg-bg">
                   <span
@@ -153,7 +153,7 @@ function CategoryCard({ stats }: { stats: MonthlyStats }) {
                     }}
                   />
                 </span>
-                <span className="tabular w-[4.5rem] text-right">{money(c.amount)}</span>
+                <span className="tabular text-right">{money(c.amount)}</span>
               </li>
             ))}
           </ul>

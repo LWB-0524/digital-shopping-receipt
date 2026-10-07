@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CATEGORY_GROUPS } from "@/lib/categories";
-import { money, trimNumber } from "@/lib/format";
+import { CURRENCY, money, trimNumber } from "@/lib/format";
 import type { ReceiptInput } from "@/lib/types";
 
 // 编辑时数字先按字符串保存，方便输入 "0." 这类中间状态
@@ -145,11 +145,11 @@ export function ReceiptEditor({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>实付合计（元）</label>
+            <label className={label}>实付合计（{CURRENCY}）</label>
             <input className={field} inputMode="decimal" value={draft.total} onChange={(e) => setDraft({ ...draft, total: e.target.value })} />
           </div>
           <div>
-            <label className={label}>整单优惠（元）</label>
+            <label className={label}>整单优惠（{CURRENCY}）</label>
             <input className={field} inputMode="decimal" value={draft.discount} onChange={(e) => setDraft({ ...draft, discount: e.target.value })} />
           </div>
         </div>

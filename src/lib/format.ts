@@ -1,5 +1,9 @@
+// 货币符号。默认新西兰元，可以在 Vercel 环境变量 NEXT_PUBLIC_CURRENCY_SYMBOL 里改（如 "¥"、"A$"），改后需重新部署
+export const CURRENCY = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || "NZ$";
+
 export function money(n: number): string {
-  return `¥${(Math.round(n * 100) / 100).toFixed(2)}`;
+  const sign = n < 0 ? "-" : "";
+  return `${sign}${CURRENCY}${(Math.round(Math.abs(n) * 100) / 100).toFixed(2)}`;
 }
 
 export function trimNumber(n: number): string {
@@ -30,6 +34,17 @@ export function dateLabel(date: string): string {
   return `${y === thisYear ? "" : `${y}年`}${m}月${d}日 周${WEEKDAYS[wd]}`;
 }
 
+// 接口返回错误时抛出，带上状态码和返回内容，方便调用方区分处理（如 409 重复小票）
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public data: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -41,6 +56,6 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
     window.location.href = "/login";
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `请求失败（${res.status}）`);
+  if (!res.ok) throw new ApiError(data.error || `请求失败（${res.status}）`, res.status, data);
   return data as T;
 }

@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { api } from "@/lib/format";
+import Link from "next/link";
+import { api, dateLabel, localDate, money } from "@/lib/format";
 
 export default function MePage() {
   const router = useRouter();
@@ -24,6 +25,8 @@ export default function MePage() {
         </div>
 
         <GenericNameTool />
+        <DuplicateTool />
+        <ExportCard />
 
         <button
           type="button"
@@ -94,6 +97,88 @@ function GenericNameTool() {
         </button>
       )}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
+type DuplicateRow = { id: number; store: string; purchased_at: string; total: number; item_count: number };
+
+// 列出可能重复的小票（同一天、金额相同），由用户自己点进去确认、删除
+function DuplicateTool() {
+  const [groups, setGroups] = useState<DuplicateRow[][] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function check() {
+    setChecking(true);
+    setError("");
+    try {
+      const data = await api<{ groups: DuplicateRow[][] }>("/api/receipts/duplicates");
+      setGroups(data.groups);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-line bg-card p-4">
+      <h2 className="font-medium">检查重复小票</h2>
+      <p className="mt-1 text-sm text-muted">
+        找出同一天、金额相同的小票，它们很可能是同一张拍了两次。点进去核对后，在详情页删除多余的那张。保存新小票时也会自动提醒。
+      </p>
+      <button
+        type="button"
+        onClick={check}
+        disabled={checking}
+        className="mt-3 w-full rounded-lg border border-accent py-2.5 font-medium text-accent disabled:opacity-60"
+      >
+        {checking ? "检查中…" : groups ? "重新检查" : "开始检查"}
+      </button>
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      {groups && groups.length === 0 && <p className="mt-3 text-sm text-accent">没有发现重复的小票 ✓</p>}
+      {groups && groups.length > 0 && (
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-warn">发现 {groups.length} 组可能重复的小票：</p>
+          {groups.map((g) => (
+            <ul key={g[0].id} className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+              {g.map((r) => (
+                <li key={r.id}>
+                  <Link href={`/receipts/${r.id}`} className="flex items-center gap-3 px-3 py-2 text-sm active:bg-bg">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate">{r.store || "未命名商店"}</p>
+                      <p className="text-xs text-muted">
+                        {dateLabel(r.purchased_at.slice(0, 10))} {r.purchased_at.slice(11)} · {r.item_count} 件
+                      </p>
+                    </div>
+                    <span className="tabular shrink-0">{money(r.total)}</span>
+                    <span className="shrink-0 text-accent">›</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExportCard() {
+  return (
+    <div className="rounded-xl border border-line bg-card p-4">
+      <h2 className="font-medium">导出 Excel</h2>
+      <p className="mt-1 text-sm text-muted">
+        下载全部记录（商品明细和小票两张表），可以当作备份，也方便自己用表格分析。小票照片不包含在内。
+      </p>
+      <a
+        href="/api/export"
+        download={`小票记账-${localDate()}.xlsx`}
+        className="mt-3 block w-full rounded-lg border border-accent py-2.5 text-center font-medium text-accent"
+      >
+        下载 Excel 文件
+      </a>
     </div>
   );
 }
