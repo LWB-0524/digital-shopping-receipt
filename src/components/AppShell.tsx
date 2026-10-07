@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 
 const TABS = [
   { href: "/", label: "小票", icon: ReceiptIcon },
-  { href: "/items", label: "品类", icon: TagIcon },
+  { href: "/items", label: "分类", icon: TagIcon },
   { href: "/scan", label: "拍小票", icon: CameraIcon, primary: true },
   { href: "/stats", label: "统计", icon: ChartIcon },
   { href: "/me", label: "我的", icon: UserIcon },

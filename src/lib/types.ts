@@ -52,4 +52,13 @@ export type MonthlyStats = {
   total: number; // 该月实付合计（按小票金额）
   receipts: number;
   categories: { category: string; amount: number }[]; // 该月各品类金额（按商品金额，未扣整单优惠）
+  stores: { store: string; visits: number; total: number }[]; // 该月各店铺实付合计（已合并同一店铺的不同写法）
+};
+
+export type StoreSummary = {
+  store: string; // 合并后的店铺名
+  visits: number;
+  total: number;
+  last: string; // 最近一次购买时间
+  names: string[]; // 小票上出现过的原始写法
 };

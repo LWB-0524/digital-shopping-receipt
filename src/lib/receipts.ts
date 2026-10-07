@@ -2,7 +2,16 @@ import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
 import { getDb } from "./db";
-import type { ItemRow, MonthlyStats, ReceiptDetail, ReceiptInput, ReceiptSummary, UploadImage } from "./types";
+import { normalizeStore } from "./stores";
+import type {
+  ItemRow,
+  MonthlyStats,
+  ReceiptDetail,
+  ReceiptInput,
+  ReceiptSummary,
+  StoreSummary,
+  UploadImage,
+} from "./types";
 
 export type Filters = {
   from?: string; // YYYY-MM-DD
@@ -10,6 +19,7 @@ export type Filters = {
   q?: string;
   group?: string;
   category?: string;
+  store?: string; // 合并后的店铺名，见 normalizeStore
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,7 +34,19 @@ export function filtersFromSearchParams(params: URLSearchParams): Filters {
     q: pick("q")?.slice(0, 50),
     group: pick("group"),
     category: pick("category"),
+    store: pick("store")?.slice(0, 100),
   };
+}
+
+// 店铺筛选：找出这个店铺在小票上出现过的所有写法
+async function storeCondition(userId: number, store: string | undefined, args: InArgs & unknown[]): Promise<string[]> {
+  if (!store) return [];
+  const db = await getDb();
+  const rs = await db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] });
+  const variants = rs.rows.map((r) => String(r.store ?? "")).filter((name) => normalizeStore(name) === store);
+  if (variants.length === 0) return ["0"];
+  args.push(...variants);
+  return [`r.store IN (${variants.map(() => "?").join(",")})`];
 }
 
 // 把筛选条件转换为针对 receipt_items 别名 i、receipts 别名 r 的 SQL 片段
@@ -76,6 +98,7 @@ export async function listReceipts(userId: number, f: Filters): Promise<ReceiptS
     where.push("r.purchased_at <= ?");
     args.push(`${f.to} 99:99`);
   }
+  where.push(...(await storeCondition(userId, f.store, args)));
   const rs = await db.execute({
     sql: `SELECT r.id, r.store, r.purchased_at, r.total,
             (SELECT COUNT(*) FROM receipt_items i WHERE i.receipt_id = r.id) AS item_count,
@@ -101,6 +124,7 @@ export async function listItems(userId: number, f: Filters): Promise<ItemRow[]> 
   const db = await getDb();
   const args: unknown[] & InArgs = [userId];
   const where = ["i.user_id = ?", ...itemConditions(f, args)];
+  where.push(...(await storeCondition(userId, f.store, args)));
   const rs = await db.execute({
     sql: `SELECT i.id, i.receipt_id, i.name, i.raw_name, i.generic_name, i.category, i.quantity, i.unit, i.unit_price, i.amount,
                  r.store, r.purchased_at
@@ -310,7 +334,7 @@ export async function monthlyStats(userId: number, month: string, end: string): 
   if (!MONTH_RE.test(month) || !MONTH_RE.test(end)) return "月份格式应为 YYYY-MM";
   const db = await getDb();
   const start = shiftMonth(end, -11);
-  const [trend, cats] = await Promise.all([
+  const [trend, cats, stores] = await Promise.all([
     db.execute({
       sql: `SELECT substr(purchased_at, 1, 7) AS month, SUM(total) AS total, COUNT(*) AS n
             FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) BETWEEN ? AND ?
@@ -322,6 +346,11 @@ export async function monthlyStats(userId: number, month: string, end: string): 
             FROM receipt_items i JOIN receipts r ON r.id = i.receipt_id
             WHERE i.user_id = ? AND substr(r.purchased_at, 1, 7) = ?
             GROUP BY i.category ORDER BY amount DESC`,
+      args: [userId, month],
+    }),
+    db.execute({
+      sql: `SELECT store, COUNT(*) AS visits, SUM(total) AS total, MAX(purchased_at) AS last
+            FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) = ? GROUP BY store`,
       args: [userId, month],
     }),
   ]);
@@ -344,6 +373,14 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     total: selected.total,
     receipts: selected.receipts,
     categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
+    stores: mergeStores(
+      stores.rows.map((r) => ({
+        name: String(r.store ?? ""),
+        visits: Number(r.visits),
+        total: Number(r.total),
+        last: String(r.last),
+      })),
+    ).map(({ store, visits, total }) => ({ store, visits, total })),
   };
 }
 
@@ -397,4 +434,46 @@ export async function listDuplicateGroups(userId: number): Promise<(DuplicateCan
     ]);
   }
   return [...groups.values()];
+}
+
+// 按店铺汇总：去过几次、花了多少、最近一次
+export async function listStores(userId: number, f: Filters): Promise<StoreSummary[]> {
+  const db = await getDb();
+  const args: unknown[] & InArgs = [userId];
+  const where = ["user_id = ?"];
+  if (f.from) {
+    where.push("purchased_at >= ?");
+    args.push(f.from);
+  }
+  if (f.to) {
+    where.push("purchased_at <= ?");
+    args.push(`${f.to} 99:99`);
+  }
+  const rs = await db.execute({
+    sql: `SELECT store, COUNT(*) AS visits, SUM(total) AS total, MAX(purchased_at) AS last
+          FROM receipts WHERE ${where.join(" AND ")} GROUP BY store`,
+    args,
+  });
+  return mergeStores(
+    rs.rows.map((r) => ({
+      name: String(r.store ?? ""),
+      visits: Number(r.visits),
+      total: Number(r.total),
+      last: String(r.last),
+    })),
+  );
+}
+
+export function mergeStores(rows: { name: string; visits: number; total: number; last: string }[]): StoreSummary[] {
+  const merged = new Map<string, StoreSummary>();
+  for (const r of rows) {
+    const key = normalizeStore(r.name);
+    const cur = merged.get(key) ?? { store: key, visits: 0, total: 0, last: "", names: [] };
+    cur.visits += r.visits;
+    cur.total += r.total;
+    if (r.last > cur.last) cur.last = r.last;
+    cur.names.push(r.name);
+    merged.set(key, cur);
+  }
+  return [...merged.values()].sort((a, b) => b.total - a.total);
 }

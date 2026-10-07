@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ClientOnly } from "@/components/ClientOnly";
+import { StoresView } from "@/components/StoresView";
 import { FilterBar, filterQuery, loadFilters, saveFilters, type FilterState } from "@/components/FilterBar";
 import { useDebounced } from "@/components/useDebounced";
 import { CATEGORY_GROUPS, groupOf } from "@/lib/categories";
@@ -12,11 +13,46 @@ import type { ItemRow } from "@/lib/types";
 
 export default function ItemsPage() {
   return (
-    <AppShell title="按品类查看">
+    <AppShell title="分类查看">
       <ClientOnly>
-        <ItemsView />
+        <ModeSwitch />
       </ClientOnly>
     </AppShell>
+  );
+}
+
+const MODE_KEY = "receipt-view-mode";
+
+function ModeSwitch() {
+  const [mode, setMode] = useState<"category" | "store">(() => {
+    try {
+      return sessionStorage.getItem(MODE_KEY) === "store" ? "store" : "category";
+    } catch {
+      return "category";
+    }
+  });
+  const choose = (m: "category" | "store") => {
+    setMode(m);
+    try {
+      sessionStorage.setItem(MODE_KEY, m);
+    } catch {
+      // 无法保存时下次回到默认的"按品类"
+    }
+  };
+  const tab = (active: boolean) =>
+    `flex-1 rounded-md py-1.5 text-sm ${active ? "bg-card font-medium text-ink shadow-sm" : "text-muted"}`;
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 rounded-lg bg-line/60 p-1">
+        <button type="button" className={tab(mode === "category")} onClick={() => choose("category")}>
+          按品类
+        </button>
+        <button type="button" className={tab(mode === "store")} onClick={() => choose("store")}>
+          按店铺
+        </button>
+      </div>
+      {mode === "category" ? <ItemsView /> : <StoresView />}
+    </div>
   );
 }
 

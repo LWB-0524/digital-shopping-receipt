@@ -9,10 +9,11 @@ export type FilterState = {
   q: string;
   group: string;
   category: string;
+  store: string;
 };
 
 export function defaultFilters(): FilterState {
-  return { from: firstDayOfMonth(), to: localDate(), q: "", group: "", category: "" };
+  return { from: firstDayOfMonth(), to: localDate(), q: "", group: "", category: "", store: "" };
 }
 
 export function filterQuery(f: FilterState): string {
@@ -52,6 +53,14 @@ export function FilterBar({
 
   return (
     <div className="space-y-2.5">
+      {value.store && (
+        <div className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">
+          <span className="min-w-0 flex-1 truncate">店铺：{value.store}</span>
+          <button type="button" className="shrink-0 px-1 text-base leading-none" onClick={() => set({ store: "" })} aria-label="取消店铺筛选">
+            ×
+          </button>
+        </div>
+      )}
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5">
         {presets().map((p) => (
           <button

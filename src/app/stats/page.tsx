@@ -1,7 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { loadFilters, saveFilters } from "@/components/FilterBar";
 import { ClientOnly } from "@/components/ClientOnly";
 import { CATEGORY_GROUPS, groupOf } from "@/lib/categories";
 import { api, money } from "@/lib/format";
@@ -96,6 +98,7 @@ function StatsView() {
           </div>
 
           <CategoryCard stats={stats} />
+          <StoreCard stats={stats} />
           <TrendCard stats={stats} selected={month} onSelect={setMonth} />
         </div>
       )}
@@ -215,6 +218,53 @@ function Donut({ groups, sum }: { groups: { group: string; amount: number }[]; s
 function percent(part: number, total: number): string {
   const p = (part / total) * 100;
   return p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`;
+}
+
+function lastDayOfMonth(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return `${month}-${pad(new Date(y, m, 0).getDate())}`;
+}
+
+// 当月在每家店花了多少；点一家店到首页看这家店当月的小票
+function StoreCard({ stats }: { stats: MonthlyStats }) {
+  const router = useRouter();
+  if (stats.stores.length === 0) return null;
+  const max = Math.max(...stats.stores.map((s) => s.total), 1);
+  const open = (store: string) => {
+    saveFilters("receipts", {
+      ...loadFilters("receipts"),
+      from: `${stats.month}-01`,
+      to: lastDayOfMonth(stats.month),
+      q: "",
+      group: "",
+      category: "",
+      store,
+    });
+    router.push("/");
+  };
+  return (
+    <section className="rounded-xl border border-line bg-card p-4">
+      <h2 className="font-medium">按店铺</h2>
+      <ul className="mt-3 space-y-2.5">
+        {stats.stores.map((s) => (
+          <li key={s.store}>
+            <button type="button" className="block w-full text-left text-sm" onClick={() => open(s.store)}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 truncate">{s.store}</span>
+                <span className="tabular shrink-0">
+                  <span className="mr-2 text-xs text-muted">{s.visits} 次</span>
+                  {money(s.total)}
+                </span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-bg">
+                <div className="h-full rounded-full" style={{ width: `${Math.max(2, (s.total / max) * 100)}%`, background: BAR }} />
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function TrendCard({
