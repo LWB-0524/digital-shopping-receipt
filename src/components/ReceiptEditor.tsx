@@ -10,6 +10,7 @@ type DraftItem = {
   key: number;
   name: string;
   raw_name: string;
+  generic_name: string;
   category: string;
   quantity: string;
   unit: string;
@@ -31,6 +32,7 @@ function toDraft(input: ReceiptInput) {
         key: nextKey++,
         name: it.name,
         raw_name: it.raw_name,
+        generic_name: it.generic_name,
         category: it.category,
         quantity: trimNumber(it.quantity),
         unit: it.unit,
@@ -103,6 +105,7 @@ export function ReceiptEditor({
         items: draft.items.map((it) => ({
           name: it.name.trim(),
           raw_name: it.raw_name,
+          generic_name: it.generic_name.trim(),
           category: it.category,
           quantity: toNum(it.quantity),
           unit: it.unit.trim(),
@@ -169,6 +172,13 @@ export function ReceiptEditor({
                   placeholder="商品名称"
                   aria-label="商品名称"
                 />
+                <input
+                  className={`${field} w-20 shrink-0`}
+                  value={it.generic_name}
+                  onChange={(e) => setItem(it.key, { generic_name: e.target.value })}
+                  placeholder="通用名"
+                  aria-label="通用名（如 鸡蛋）"
+                />
                 <button
                   type="button"
                   className="shrink-0 px-2 text-sm text-danger"
@@ -215,7 +225,7 @@ export function ReceiptEditor({
               ...draft,
               items: [
                 ...draft.items,
-                { key: nextKey++, name: "", raw_name: "", category: "其他", quantity: "1", unit: "", unit_price: "", amount: "" },
+                { key: nextKey++, name: "", raw_name: "", generic_name: "", category: "其他", quantity: "1", unit: "", unit_price: "", amount: "" },
               ],
             })
           }

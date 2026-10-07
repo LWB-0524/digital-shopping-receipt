@@ -2,7 +2,7 @@ import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
 import { getDb } from "./db";
-import type { ItemRow, ReceiptDetail, ReceiptInput, ReceiptSummary, UploadImage } from "./types";
+import type { ItemRow, MonthlyStats, ReceiptDetail, ReceiptInput, ReceiptSummary, UploadImage } from "./types";
 
 export type Filters = {
   from?: string; // YYYY-MM-DD
@@ -50,9 +50,11 @@ function itemConditions(f: Filters, args: InArgs & unknown[]): string[] {
     }
   }
   if (f.q) {
-    where.push("(i.name LIKE ? ESCAPE '\\' OR i.raw_name LIKE ? ESCAPE '\\' OR r.store LIKE ? ESCAPE '\\')");
+    where.push(
+      "(i.name LIKE ? ESCAPE '\\' OR i.raw_name LIKE ? ESCAPE '\\' OR i.generic_name LIKE ? ESCAPE '\\' OR r.store LIKE ? ESCAPE '\\')",
+    );
     const like = `%${f.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-    args.push(like, like, like);
+    args.push(like, like, like, like);
   }
   return where;
 }
@@ -100,7 +102,7 @@ export async function listItems(userId: number, f: Filters): Promise<ItemRow[]> 
   const args: unknown[] & InArgs = [userId];
   const where = ["i.user_id = ?", ...itemConditions(f, args)];
   const rs = await db.execute({
-    sql: `SELECT i.id, i.receipt_id, i.name, i.raw_name, i.category, i.quantity, i.unit, i.unit_price, i.amount,
+    sql: `SELECT i.id, i.receipt_id, i.name, i.raw_name, i.generic_name, i.category, i.quantity, i.unit, i.unit_price, i.amount,
                  r.store, r.purchased_at
           FROM receipt_items i JOIN receipts r ON r.id = i.receipt_id
           WHERE ${where.join(" AND ")}
@@ -113,6 +115,7 @@ export async function listItems(userId: number, f: Filters): Promise<ItemRow[]> 
     receipt_id: Number(row.receipt_id),
     name: String(row.name),
     raw_name: String(row.raw_name ?? ""),
+    generic_name: String(row.generic_name ?? ""),
     category: String(row.category),
     quantity: Number(row.quantity),
     unit: String(row.unit ?? ""),
@@ -147,6 +150,7 @@ export async function getReceipt(userId: number, id: number): Promise<ReceiptDet
       id: Number(it.id),
       name: String(it.name),
       raw_name: String(it.raw_name ?? ""),
+      generic_name: String(it.generic_name ?? ""),
       category: String(it.category),
       quantity: Number(it.quantity),
       unit: String(it.unit ?? ""),
@@ -159,21 +163,34 @@ export async function getReceipt(userId: number, id: number): Promise<ReceiptDet
 async function insertItems(tx: Transaction, userId: number, receiptId: number, input: ReceiptInput) {
   for (const [position, it] of input.items.entries()) {
     await tx.execute({
-      sql: `INSERT INTO receipt_items (receipt_id, user_id, position, name, raw_name, category, quantity, unit, unit_price, amount)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [receiptId, userId, position, it.name, it.raw_name, it.category, it.quantity, it.unit, it.unit_price, it.amount],
+      sql: `INSERT INTO receipt_items (receipt_id, user_id, position, name, raw_name, generic_name, category, quantity, unit, unit_price, amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        receiptId,
+        userId,
+        position,
+        it.name,
+        it.raw_name,
+        it.generic_name,
+        it.category,
+        it.quantity,
+        it.unit,
+        it.unit_price,
+        it.amount,
+      ],
     });
   }
 }
 
-// 用户确认保存时记住每个商品的品类，下次识别同名商品直接套用
+// 用户确认保存时记住每个商品的品类和通用名，下次识别同名商品直接套用
 async function rememberCategories(tx: Transaction, userId: number, input: ReceiptInput) {
   for (const it of input.items) {
     for (const name of new Set([it.name, it.raw_name].filter(Boolean))) {
       await tx.execute({
-        sql: `INSERT INTO category_rules (user_id, name, category) VALUES (?, ?, ?)
-              ON CONFLICT(user_id, name) DO UPDATE SET category = excluded.category, updated_at = datetime('now')`,
-        args: [userId, name, it.category],
+        sql: `INSERT INTO category_rules (user_id, name, category, generic_name) VALUES (?, ?, ?, ?)
+              ON CONFLICT(user_id, name) DO UPDATE SET category = excluded.category,
+                generic_name = excluded.generic_name, updated_at = datetime('now')`,
+        args: [userId, name, it.category, it.generic_name],
       });
     }
   }
@@ -255,7 +272,9 @@ export async function getImage(
 }
 
 // 识别结果按用户以前确认过的品类修正
-export async function applyCategoryRules<T extends { name: string; raw_name: string; category: string }>(
+export async function applyCategoryRules<
+  T extends { name: string; raw_name: string; category: string; generic_name: string },
+>(
   userId: number,
   items: T[],
 ): Promise<T[]> {
@@ -263,12 +282,67 @@ export async function applyCategoryRules<T extends { name: string; raw_name: str
   if (names.length === 0) return items;
   const db = await getDb();
   const rs = await db.execute({
-    sql: `SELECT name, category FROM category_rules WHERE user_id = ? AND name IN (${names.map(() => "?").join(",")})`,
+    sql: `SELECT name, category, generic_name FROM category_rules WHERE user_id = ? AND name IN (${names.map(() => "?").join(",")})`,
     args: [userId, ...names],
   });
-  const rules = new Map(rs.rows.map((r) => [String(r.name), String(r.category)]));
+  const rules = new Map(
+    rs.rows.map((r) => [String(r.name), { category: String(r.category), generic_name: String(r.generic_name ?? "") }]),
+  );
   return items.map((it) => {
-    const category = rules.get(it.raw_name) ?? rules.get(it.name);
-    return category ? { ...it, category } : it;
+    const byRaw = rules.get(it.raw_name);
+    const byName = rules.get(it.name);
+    const rule = byRaw ?? byName;
+    if (!rule) return it;
+    const generic = byRaw?.generic_name || byName?.generic_name || it.generic_name;
+    return { ...it, category: rule.category, generic_name: generic };
   });
+}
+
+const MONTH_RE = /^\d{4}-\d{2}$/;
+
+function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export async function monthlyStats(userId: number, month: string, end: string): Promise<MonthlyStats | string> {
+  if (!MONTH_RE.test(month) || !MONTH_RE.test(end)) return "月份格式应为 YYYY-MM";
+  const db = await getDb();
+  const start = shiftMonth(end, -11);
+  const [trend, cats] = await Promise.all([
+    db.execute({
+      sql: `SELECT substr(purchased_at, 1, 7) AS month, SUM(total) AS total, COUNT(*) AS n
+            FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) BETWEEN ? AND ?
+            GROUP BY month`,
+      args: [userId, start, end],
+    }),
+    db.execute({
+      sql: `SELECT i.category, SUM(i.amount) AS amount
+            FROM receipt_items i JOIN receipts r ON r.id = i.receipt_id
+            WHERE i.user_id = ? AND substr(r.purchased_at, 1, 7) = ?
+            GROUP BY i.category ORDER BY amount DESC`,
+      args: [userId, month],
+    }),
+  ]);
+  const byMonth = new Map(trend.rows.map((r) => [String(r.month), { total: Number(r.total), receipts: Number(r.n) }]));
+  // 选中的月份可能不在趋势范围内，单独查一次
+  let selected = byMonth.get(month);
+  if (!selected) {
+    const rs = await db.execute({
+      sql: `SELECT SUM(total) AS total, COUNT(*) AS n FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) = ?`,
+      args: [userId, month],
+    });
+    selected = { total: Number(rs.rows[0]?.total ?? 0), receipts: Number(rs.rows[0]?.n ?? 0) };
+  }
+  return {
+    months: Array.from({ length: 12 }, (_, i) => {
+      const m = shiftMonth(start, i);
+      return { month: m, ...(byMonth.get(m) ?? { total: 0, receipts: 0 }) };
+    }),
+    month,
+    total: selected.total,
+    receipts: selected.receipts,
+    categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
+  };
 }

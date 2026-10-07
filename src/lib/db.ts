@@ -57,6 +57,30 @@ const SCHEMA = [
   )`,
 ];
 
+// 后来新增的列。只做 ADD COLUMN，不改动已有数据；已存在的列会跳过。
+const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
+  // 通用名：把不同品牌、不同叫法的同类商品归到一起（如"鸡蛋"），用于搜索和比价
+  { table: "receipt_items", column: "generic_name", definition: "TEXT NOT NULL DEFAULT ''" },
+  { table: "category_rules", column: "generic_name", definition: "TEXT NOT NULL DEFAULT ''" },
+];
+
+async function addMissingColumns(db: Client) {
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const info = await db.execute(`PRAGMA table_info(${table})`);
+    if (info.rows.some((r) => r.name === column)) continue;
+    try {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    } catch (err) {
+      // 多个服务器实例同时启动时，可能已被另一个实例加上
+      const again = await db.execute(`PRAGMA table_info(${table})`);
+      if (!again.rows.some((r) => r.name === column)) throw err;
+    }
+  }
+  await db.execute(
+    "CREATE INDEX IF NOT EXISTS idx_items_user_generic ON receipt_items(user_id, generic_name)",
+  );
+}
+
 const globalForDb = globalThis as unknown as {
   receiptDb?: Client;
   receiptDbReady?: Promise<void>;
@@ -76,6 +100,7 @@ export async function getDb(): Promise<Client> {
     globalForDb.receiptDbReady = (async () => {
       await db.execute("PRAGMA foreign_keys = ON");
       await db.batch(SCHEMA, "write");
+      await addMissingColumns(db);
     })().catch((err) => {
       globalForDb.receiptDbReady = undefined;
       throw err;

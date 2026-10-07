@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ClientOnly } from "@/components/ClientOnly";
@@ -12,7 +11,7 @@ import type { ItemRow, ReceiptSummary } from "@/lib/types";
 
 export default function ReceiptsPage() {
   return (
-    <AppShell title="我的小票" action={<LogoutButton />}>
+    <AppShell title="我的小票">
       <ClientOnly>
         <ReceiptList />
       </ClientOnly>
@@ -67,7 +66,7 @@ function ReceiptList() {
 
       <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
         {result?.mode === "receipts" && <ReceiptGroups receipts={result.receipts} />}
-        {result?.mode === "items" && <ItemMatches items={result.items} />}
+        {result?.mode === "items" && <ItemMatches items={result.items} showPrices={new URLSearchParams(result.query).has("q")} />}
       </div>
     </div>
   );
@@ -135,7 +134,7 @@ function ReceiptGroups({ receipts }: { receipts: ReceiptSummary[] }) {
 }
 
 // 搜索结果：匹配到的商品，按所属小票分组
-function ItemMatches({ items }: { items: ItemRow[] }) {
+function ItemMatches({ items, showPrices }: { items: ItemRow[]; showPrices: boolean }) {
   const receipts = useMemo(() => {
     const map = new Map<number, ItemRow[]>();
     for (const it of items) map.set(it.receipt_id, [...(map.get(it.receipt_id) ?? []), it]);
@@ -155,6 +154,7 @@ function ItemMatches({ items }: { items: ItemRow[] }) {
         amount={items.reduce((s, it) => s + it.amount, 0)}
       />
       {items.length === 0 && <p className="py-12 text-center text-sm text-muted">没有找到符合条件的商品</p>}
+      {showPrices && items.length >= 2 && <PriceCompare items={items} />}
       {days.map(([day, list]) => (
         <section key={day} className="space-y-2">
           <div className="px-1 text-sm text-muted">{dateLabel(day)}</div>
@@ -175,8 +175,9 @@ function ItemMatches({ items }: { items: ItemRow[] }) {
                   <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
                     <div className="min-w-0 flex-1">
                       <p className="truncate">{it.name}</p>
-                      <p className="mt-0.5 text-xs">
+                      <p className="mt-0.5 flex items-center gap-1.5 text-xs">
                         <span className="rounded bg-accent-soft px-1.5 py-px text-accent">{it.category}</span>
+                        {it.generic_name && <span className="text-muted">{it.generic_name}</span>}
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
@@ -197,20 +198,79 @@ function ItemMatches({ items }: { items: ItemRow[] }) {
   );
 }
 
-function LogoutButton() {
-  const router = useRouter();
+function unitPrice(it: ItemRow): number {
+  if (it.unit_price > 0) return it.unit_price;
+  return it.quantity > 0 ? it.amount / it.quantity : it.amount;
+}
+
+type ProductStats = {
+  name: string;
+  unit: string;
+  count: number;
+  min: ItemRow;
+  max: ItemRow;
+};
+
+// 价格对比：按通用名分组，组内每个具体商品列出买过几次、最低价和最高价（在哪家店、哪天）
+function PriceCompare({ items }: { items: ItemRow[] }) {
+  const groups = useMemo(() => {
+    const byGeneric = new Map<string, Map<string, ItemRow[]>>();
+    for (const it of items) {
+      const generic = it.generic_name || it.name;
+      const products = byGeneric.get(generic) ?? new Map<string, ItemRow[]>();
+      products.set(it.name, [...(products.get(it.name) ?? []), it]);
+      byGeneric.set(generic, products);
+    }
+    return [...byGeneric.entries()]
+      .map(([generic, products]) => {
+        const list: ProductStats[] = [...products.entries()].map(([name, rows]) => {
+          const sorted = [...rows].sort((a, b) => unitPrice(a) - unitPrice(b));
+          return { name, unit: rows[0].unit, count: rows.length, min: sorted[0], max: sorted[sorted.length - 1] };
+        });
+        list.sort((a, b) => b.count - a.count || unitPrice(a.min) - unitPrice(b.min));
+        return { generic, count: list.reduce((s, p) => s + p.count, 0), products: list };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [items]);
+
+  const where = (it: ItemRow) => `${it.store || "未命名商店"} · ${it.purchased_at.slice(5, 10).replace("-", "/")}`;
+
   return (
-    <button
-      type="button"
-      className="text-sm text-muted"
-      onClick={async () => {
-        if (!confirm("确定退出登录？")) return;
-        await api("/api/auth/logout", { method: "POST" });
-        router.replace("/login");
-        router.refresh();
-      }}
-    >
-      退出
-    </button>
+    <section className="rounded-xl border border-line bg-card p-4">
+      <h2 className="font-medium">价格对比</h2>
+      <div className="mt-2 space-y-4">
+        {groups.map((g) => (
+          <div key={g.generic}>
+            <p className="text-sm text-muted">
+              {g.generic} · 共买过 {g.count} 次{g.products.length > 1 && `，${g.products.length} 种商品`}
+            </p>
+            <ul className="mt-1.5 divide-y divide-line">
+              {g.products.slice(0, 4).map((p) => (
+                <li key={p.name} className="py-2 text-sm">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate">{p.name}</span>
+                    <span className="shrink-0 text-xs text-muted">{p.count} 次</span>
+                  </div>
+                  <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
+                    <span>
+                      <span className="text-accent">最低 {money(unitPrice(p.min))}</span>
+                      {p.unit && `/${p.unit}`} <span className="text-muted">{where(p.min)}</span>
+                    </span>
+                    {unitPrice(p.max) > unitPrice(p.min) && (
+                      <span>
+                        <span className="text-warn">最高 {money(unitPrice(p.max))}</span>
+                        {p.unit && `/${p.unit}`} <span className="text-muted">{where(p.max)}</span>
+                      </span>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {g.products.length > 4 && <p className="text-xs text-muted">还有 {g.products.length - 4} 种，见下方列表</p>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -3,6 +3,7 @@
 export type ReceiptItemInput = {
   name: string;
   raw_name: string;
+  generic_name: string; // 通用名，如"鸡蛋"，同类商品归在一起
   category: string;
   quantity: number;
   unit: string;
@@ -43,4 +44,12 @@ export type ItemRow = ReceiptItemInput & {
   receipt_id: number;
   store: string;
   purchased_at: string;
+};
+
+export type MonthlyStats = {
+  months: { month: string; total: number; receipts: number }[]; // 趋势：截至 end 的最近 12 个月
+  month: string;
+  total: number; // 该月实付合计（按小票金额）
+  receipts: number;
+  categories: { category: string; amount: number }[]; // 该月各品类金额（按商品金额，未扣整单优惠）
 };

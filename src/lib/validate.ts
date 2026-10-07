@@ -25,6 +25,7 @@ export function parseItem(raw: unknown): ReceiptItemInput | string {
   return {
     name,
     raw_name: str(r.raw_name),
+    generic_name: str(r.generic_name, 30),
     category: isCategory(r.category) ? r.category : CATEGORIES[CATEGORIES.length - 1],
     quantity: num(r.quantity, 1),
     unit: str(r.unit, 20),

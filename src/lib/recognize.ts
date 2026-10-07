@@ -4,7 +4,7 @@ import { CATEGORY_GROUPS, CATEGORIES } from "./categories";
 import type { RecognizeResult, UploadImage } from "./types";
 import { parseReceipt } from "./validate";
 
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
+export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 
 const categoryGuide = CATEGORY_GROUPS.map((g) => `${g.group}：${g.categories.join("、")}`).join("\n");
 
@@ -18,6 +18,7 @@ const SYSTEM_PROMPT = `你是购物小票识别助手。用户会上传一张或
 - items：每个商品一条。
   - raw_name：小票上印的原始品名。
   - name：整理后易读的商品名，补全明显的缩写，去掉条码和无意义编号，保留品牌和规格（如"伊利纯牛奶 250ml×12"）。
+  - generic_name：通用名，即这件商品最常用的简短叫法，去掉品牌、规格和口味，用来把不同牌子、不同写法的同类商品归在一起，例如"鸡蛋"、"牛奶"、"薯片"、"卫生纸"、"西红柿"。
   - category：只能从给定品类中选择最合适的一个。
   - quantity：数量；称重商品填重量数值（如 0.536），unit 填 "kg"。
   - unit：单位，如 "个"、"袋"、"kg"，不确定就留空字符串。
@@ -48,10 +49,11 @@ const RESULT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["raw_name", "name", "category", "quantity", "unit", "unit_price", "amount"],
+        required: ["raw_name", "name", "generic_name", "category", "quantity", "unit", "unit_price", "amount"],
         properties: {
           raw_name: { type: "string" },
           name: { type: "string" },
+          generic_name: { type: "string" },
           category: { type: "string", enum: CATEGORIES },
           quantity: { type: "number" },
           unit: { type: "string" },
@@ -73,7 +75,7 @@ export class RecognizeError extends Error {
 }
 
 let client: Anthropic | undefined;
-function getClient(): Anthropic {
+export function getClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new RecognizeError("服务器没有配置 ANTHROPIC_API_KEY，无法识别小票", 500);
   }
@@ -174,10 +176,10 @@ function mockResult(today: string): RecognizeResult {
     note: "",
     warnings: "这是 RECOGNIZE_MOCK 生成的演示数据",
     items: [
-      { raw_name: "伊利纯牛奶250ML*12", name: "伊利纯牛奶 250ml×12", category: "乳制品", quantity: 1, unit: "箱", unit_price: 39.9, amount: 39.9 },
-      { raw_name: "乐事薯片原味70G", name: "乐事薯片 原味 70g", category: "零食", quantity: 2, unit: "袋", unit_price: 7.5, amount: 15 },
-      { raw_name: "西红柿", name: "西红柿", category: "蔬菜水果", quantity: 0.85, unit: "kg", unit_price: 9.8, amount: 8.33 },
-      { raw_name: "购物袋", name: "购物袋", category: "日用品", quantity: 1, unit: "个", unit_price: 0.3, amount: 0.3 },
+      { raw_name: "伊利纯牛奶250ML*12", generic_name: "牛奶", name: "伊利纯牛奶 250ml×12", category: "乳制品", quantity: 1, unit: "箱", unit_price: 39.9, amount: 39.9 },
+      { raw_name: "乐事薯片原味70G", generic_name: "薯片", name: "乐事薯片 原味 70g", category: "零食", quantity: 2, unit: "袋", unit_price: 7.5, amount: 15 },
+      { raw_name: "西红柿", generic_name: "西红柿", name: "西红柿", category: "蔬菜水果", quantity: 0.85, unit: "kg", unit_price: 9.8, amount: 8.33 },
+      { raw_name: "购物袋", generic_name: "购物袋", name: "购物袋", category: "日用品", quantity: 1, unit: "个", unit_price: 0.3, amount: 0.3 },
     ],
   };
 }
