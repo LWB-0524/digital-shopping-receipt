@@ -1,0 +1,85 @@
+import "server-only";
+import { createClient, type Client } from "@libsql/client";
+
+// 本地开发默认用项目目录下的 SQLite 文件；部署时把 DATABASE_URL 指向 Turso 云数据库。
+const url = process.env.DATABASE_URL || "file:local.db";
+const authToken = process.env.DATABASE_AUTH_TOKEN || undefined;
+
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    store TEXT NOT NULL DEFAULT '',
+    purchased_at TEXT NOT NULL,
+    total REAL NOT NULL DEFAULT 0,
+    discount REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_receipts_user_date ON receipts(user_id, purchased_at)`,
+  `CREATE TABLE IF NOT EXISTS receipt_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    receipt_id INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    position INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    raw_name TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 1,
+    unit TEXT NOT NULL DEFAULT '',
+    unit_price REAL NOT NULL DEFAULT 0,
+    amount REAL NOT NULL DEFAULT 0
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_items_receipt ON receipt_items(receipt_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_items_user_category ON receipt_items(user_id, category)`,
+  `CREATE TABLE IF NOT EXISTS receipt_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    receipt_id INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    media_type TEXT NOT NULL,
+    data BLOB NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_images_receipt ON receipt_images(receipt_id)`,
+  // 记住用户确认过的"商品名 → 品类"，下次识别到同名商品时直接套用。
+  `CREATE TABLE IF NOT EXISTS category_rules (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, name)
+  )`,
+];
+
+const globalForDb = globalThis as unknown as {
+  receiptDb?: Client;
+  receiptDbReady?: Promise<void>;
+};
+
+function client(): Client {
+  if (!globalForDb.receiptDb) {
+    globalForDb.receiptDb = createClient({ url, authToken });
+  }
+  return globalForDb.receiptDb;
+}
+
+// 首次访问时自动建表，部署后不需要手动跑迁移。
+export async function getDb(): Promise<Client> {
+  const db = client();
+  if (!globalForDb.receiptDbReady) {
+    globalForDb.receiptDbReady = (async () => {
+      await db.execute("PRAGMA foreign_keys = ON");
+      await db.batch(SCHEMA, "write");
+    })().catch((err) => {
+      globalForDb.receiptDbReady = undefined;
+      throw err;
+    });
+  }
+  await globalForDb.receiptDbReady;
+  return db;
+}

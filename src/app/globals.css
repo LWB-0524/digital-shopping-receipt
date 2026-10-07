@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f5f6f3;
+  --color-card: #ffffff;
+  --color-ink: #1d211b;
+  --color-muted: #6a7065;
+  --color-line: #e3e6df;
+  --color-accent: #1d7f55;
+  --color-accent-soft: #e4f2ea;
+  --color-warn: #a15c07;
+  --color-warn-soft: #fdf2d8;
+  --color-danger: #b42318;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* iOS 输入框字号小于 16px 时聚焦会自动放大页面 */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
