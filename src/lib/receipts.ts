@@ -2,7 +2,7 @@ import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
 import { getDb } from "./db";
-import { canonicalStore } from "./stores";
+import { resolveStoreNames } from "./stores";
 import type {
   ItemRow,
   MonthlyStats,
@@ -19,7 +19,7 @@ export type Filters = {
   q?: string;
   group?: string;
   category?: string;
-  store?: string; // 合并后的店铺名，见 canonicalStore
+  store?: string; // 合并后的店铺名，见 resolveStoreNames
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,12 +41,8 @@ export function filtersFromSearchParams(params: URLSearchParams): Filters {
 // 店铺筛选：找出这个店铺在小票上出现过的所有写法
 async function storeCondition(userId: number, store: string | undefined, args: InArgs & unknown[]): Promise<string[]> {
   if (!store) return [];
-  const db = await getDb();
-  const [rs, aliases] = await Promise.all([
-    db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
-    loadStoreAliases(userId),
-  ]);
-  const variants = rs.rows.map((r) => String(r.store ?? "")).filter((name) => canonicalStore(name, aliases) === store);
+  const { names } = await storeNames(userId);
+  const variants = [...names].filter(([, display]) => display === store).map(([raw]) => raw);
   if (variants.length === 0) return ["0"];
   args.push(...variants);
   return [`r.store IN (${variants.map(() => "?").join(",")})`];
@@ -377,7 +373,7 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     receipts: selected.receipts,
     categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
     stores: mergeStores(
-      await loadStoreAliases(userId),
+      await storeNames(userId),
       stores.rows.map((r) => ({
         name: String(r.store ?? ""),
         visits: Number(r.visits),
@@ -459,7 +455,7 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
     args,
   });
   return mergeStores(
-    await loadStoreAliases(userId),
+    await storeNames(userId),
     rs.rows.map((r) => ({
       name: String(r.store ?? ""),
       visits: Number(r.visits),
@@ -469,13 +465,23 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
   );
 }
 
-export function mergeStores(
-  aliases: Map<string, string>,
+// 店名解析：基于该用户全部小票计算，保证不同日期范围下同一家店的名字一致
+async function storeNames(userId: number): Promise<{ names: Map<string, string>; aliases: Map<string, string> }> {
+  const db = await getDb();
+  const [rs, aliases] = await Promise.all([
+    db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
+    loadStoreAliases(userId),
+  ]);
+  return { names: resolveStoreNames(rs.rows.map((r) => String(r.store ?? "")), aliases), aliases };
+}
+
+function mergeStores(
+  { names, aliases }: { names: Map<string, string>; aliases: Map<string, string> },
   rows: { name: string; visits: number; total: number; last: string }[],
 ): StoreSummary[] {
   const merged = new Map<string, StoreSummary>();
   for (const r of rows) {
-    const key = canonicalStore(r.name, aliases);
+    const key = names.get(r.name) ?? r.name;
     const cur = merged.get(key) ?? { store: key, visits: 0, total: 0, last: "", names: [], custom: false };
     if (aliases.has(r.name)) cur.custom = true;
     cur.visits += r.visits;
@@ -496,12 +502,8 @@ export async function loadStoreAliases(userId: number): Promise<Map<string, stri
 // 把若干家店合并成一家：这些店（含它们已合并的各种写法）的原始店名都指向 canonical
 export async function mergeStoreNames(userId: number, stores: string[], canonical: string): Promise<number> {
   const db = await getDb();
-  const [rs, aliases] = await Promise.all([
-    db.execute({ sql: "SELECT DISTINCT store FROM receipts WHERE user_id = ?", args: [userId] }),
-    loadStoreAliases(userId),
-  ]);
   const wanted = new Set(stores);
-  const names = rs.rows.map((r) => String(r.store ?? "")).filter((n) => wanted.has(canonicalStore(n, aliases)));
+  const names = [...(await storeNames(userId)).names].filter(([, display]) => wanted.has(display)).map(([raw]) => raw);
   if (names.length === 0) return 0;
   await db.batch(
     names.map((name) => ({

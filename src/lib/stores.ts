@@ -14,6 +14,22 @@ export function canonicalStore(store: string, aliases?: Map<string, string>): st
   return aliases?.get(store) ?? normalizeStore(store);
 }
 
+// 算出每个原始店名最终显示成什么。只有确实有多种写法要合并时才去掉括号，
+// 只有一种写法的店保留小票上的完整名称（如带地址的分店名）。
+export function resolveStoreNames(rawNames: string[], aliases: Map<string, string>): Map<string, string> {
+  const groups = new Map<string, string[]>();
+  for (const raw of new Set(rawNames)) {
+    const key = canonicalStore(raw, aliases);
+    groups.set(key, [...(groups.get(key) ?? []), raw]);
+  }
+  const result = new Map<string, string>();
+  for (const [key, raws] of groups) {
+    const keepOriginal = raws.length === 1 && !aliases.has(raws[0]);
+    for (const raw of raws) result.set(raw, keepOriginal ? raw : key);
+  }
+  return result;
+}
+
 // 店名里的品牌词：第一个英文单词（跳过 supermarket 这类通用词），用来提示"可能是同一家"
 const GENERIC_WORDS = new Set(["the", "new", "nz", "supermarket", "store", "shop", "market", "mart"]);
 
