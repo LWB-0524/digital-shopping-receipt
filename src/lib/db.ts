@@ -1,9 +1,10 @@
 import "server-only";
 import { createClient, type Client } from "@libsql/client";
 
-// 本地开发默认用项目目录下的 SQLite 文件；部署时把 DATABASE_URL 指向 Turso 云数据库。
-const url = process.env.DATABASE_URL || "file:local.db";
-const authToken = process.env.DATABASE_AUTH_TOKEN || undefined;
+// 本地开发默认用项目目录下的 SQLite 文件；部署时指向 Turso 云数据库。
+// 在 Vercel 里添加 Turso 集成会自动注入 TURSO_* 变量，也可以手动填 DATABASE_*。
+const url = process.env.DATABASE_URL || process.env.TURSO_DATABASE_URL || "file:local.db";
+const authToken = process.env.DATABASE_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN || undefined;
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS users (

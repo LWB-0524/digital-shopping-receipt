@@ -25,28 +25,28 @@
 
 API Key 只保存在服务器上，浏览器里拿不到。小票照片会先在手机上压缩，再上传识别，并和记录一起存进数据库。
 
-## 部署上线（约 15 分钟，不需要写代码）
+## 部署上线（约 10 分钟，全程在网页上点，不需要写代码）
 
 ### 1. 获取 Claude API Key
 到 <https://console.anthropic.com> 注册，充值后在 **API Keys** 页面创建一个 Key（以 `sk-ant-` 开头）。
 
-### 2. 创建 Turso 数据库（免费）
-1. 用 GitHub 账号登录 <https://turso.tech>，新建一个 Database。
-2. 在数据库页面复制 **URL**（形如 `libsql://xxx.turso.io`），再点 **Create Token** 生成一个 Token。
-
-### 3. 部署到 Vercel（免费）
-1. 用 GitHub 账号登录 <https://vercel.com>，点 **Add New → Project**，导入这个仓库。
-2. 在 **Environment Variables** 里填写以下变量（说明见 `.env.example`）：
+### 2. 在 Vercel 导入项目
+1. 用 GitHub 账号登录 <https://vercel.com>，点 **Add New → Project**，选择这个仓库，点 **Import**。
+2. 展开 **Environment Variables**，添加三项：
 
    | 变量 | 值 |
    |---|---|
    | `ANTHROPIC_API_KEY` | 第 1 步获得的 Key |
-   | `SESSION_SECRET` | 一串随机字符，至少 32 位 |
+   | `SESSION_SECRET` | 一串随机字符，至少 32 位（随便敲一长串字母数字就行） |
    | `INVITE_CODE` | 你自己定的邀请码 |
-   | `DATABASE_URL` | Turso 的 URL |
-   | `DATABASE_AUTH_TOKEN` | Turso 的 Token |
 
-3. 点 **Deploy**。完成后你会得到一个网址，例如 `https://xxx.vercel.app`。
+3. 点 **Deploy**。这次部署会成功，但网站还不能用，因为还没有数据库。
+
+### 3. 添加数据库（免费）
+1. 在 Vercel 项目页面打开 **Storage** 标签，选择 **Turso**，按提示创建数据库并连接到这个项目。连接后，`TURSO_DATABASE_URL` 和 `TURSO_AUTH_TOKEN` 会自动加进环境变量。
+2. 打开 **Deployments** 标签，在最新一次部署右侧的 **⋯** 菜单里点 **Redeploy**，让新的环境变量生效。
+
+如果 Storage 里找不到 Turso：可以到 <https://turso.tech> 自己建一个数据库，把它的 URL 和 Token 填到 `DATABASE_URL`、`DATABASE_AUTH_TOKEN` 两个环境变量里，再 Redeploy。
 
 数据表会在第一次访问时自动创建，不需要额外操作。
 
