@@ -1,4 +1,4 @@
-import { CATEGORIES, isCategory } from "./categories";
+import { CATEGORIES, isCategory, isReceiptKind } from "./categories";
 import type { ReceiptInput, ReceiptItemInput, UploadImage } from "./types";
 
 // 校验并清洗客户端提交的数据。返回 string 表示错误信息。
@@ -48,6 +48,7 @@ export function parseReceipt(raw: unknown): ReceiptInput | string {
     items.push(parsed);
   }
   return {
+    kind: isReceiptKind(r.kind) ? r.kind : "grocery",
     store: str(r.store, 100),
     purchased_at,
     total: num(r.total),

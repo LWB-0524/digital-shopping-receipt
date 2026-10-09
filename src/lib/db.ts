@@ -70,6 +70,8 @@ const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
   // 通用名：把不同品牌、不同叫法的同类商品归到一起（如"鸡蛋"），用于搜索和比价
   { table: "receipt_items", column: "generic_name", definition: "TEXT NOT NULL DEFAULT ''" },
   { table: "category_rules", column: "generic_name", definition: "TEXT NOT NULL DEFAULT ''" },
+  // 小票类型：grocery 超市购物 / dining 外出就餐。已有的小票默认都是超市购物
+  { table: "receipts", column: "kind", definition: "TEXT NOT NULL DEFAULT 'grocery'" },
 ];
 
 async function addMissingColumns(db: Client) {

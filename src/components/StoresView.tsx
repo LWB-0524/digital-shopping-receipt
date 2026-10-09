@@ -60,7 +60,16 @@ export function StoresView() {
 
   function open(store: string) {
     // 带着当前日期范围跳到首页，只看这家店的小票
-    saveFilters("receipts", { ...loadFilters("receipts"), from: filters.from, to: filters.to, q: "", group: "", category: "", store });
+    saveFilters("receipts", {
+      ...loadFilters("receipts"),
+      from: filters.from,
+      to: filters.to,
+      kind: filters.kind,
+      q: "",
+      group: "",
+      category: "",
+      store,
+    });
     router.push("/");
   }
 

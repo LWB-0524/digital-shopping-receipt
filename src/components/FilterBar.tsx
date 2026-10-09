@@ -1,6 +1,6 @@
 "use client";
 
-import { CATEGORY_GROUPS } from "@/lib/categories";
+import { CATEGORY_GROUPS, RECEIPT_KINDS } from "@/lib/categories";
 import { firstDayOfMonth, localDate } from "@/lib/format";
 
 export type FilterState = {
@@ -10,10 +10,11 @@ export type FilterState = {
   group: string;
   category: string;
   store: string;
+  kind: string; // "" 全部 / grocery 超市 / dining 餐饮
 };
 
 export function defaultFilters(): FilterState {
-  return { from: firstDayOfMonth(), to: localDate(), q: "", group: "", category: "", store: "" };
+  return { from: firstDayOfMonth(), to: localDate(), q: "", group: "", category: "", store: "", kind: "" };
 }
 
 export function filterQuery(f: FilterState): string {
@@ -61,6 +62,20 @@ export function FilterBar({
           </button>
         </div>
       )}
+      <div className="flex gap-1 rounded-lg bg-line/60 p-1" role="radiogroup" aria-label="小票类型">
+        {[{ kind: "", short: "全部" }, ...RECEIPT_KINDS].map((k) => (
+          <button
+            key={k.kind}
+            type="button"
+            role="radio"
+            aria-checked={value.kind === k.kind}
+            onClick={() => set({ kind: k.kind })}
+            className={`flex-1 rounded-md py-1 text-sm ${value.kind === k.kind ? "bg-card font-medium text-ink shadow-sm" : "text-muted"}`}
+          >
+            {k.short}
+          </button>
+        ))}
+      </div>
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5">
         {presets().map((p) => (
           <button

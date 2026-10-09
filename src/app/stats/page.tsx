@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { loadFilters, saveFilters } from "@/components/FilterBar";
 import { ClientOnly } from "@/components/ClientOnly";
-import { CATEGORY_GROUPS, groupOf } from "@/lib/categories";
+import { CATEGORY_GROUPS, groupOf, RECEIPT_KINDS } from "@/lib/categories";
 import { api, money } from "@/lib/format";
 import type { MonthlyStats } from "@/lib/types";
 
@@ -15,6 +15,7 @@ const GROUP_COLORS: Record<string, string> = {
   食品: "#2a78d6",
   零食饮料: "#eb6834",
   日用百货: "#1baf7a",
+  外出就餐: "#4a3aa7",
   其他: "#eda100",
 };
 const BAR = "#2a78d6";
@@ -95,6 +96,7 @@ function StatsView() {
               {stats.receipts} 张小票
               {change !== null && ` · 比上月${change >= 0 ? "多" : "少"} ${Math.abs(Math.round(change * 100))}%`}
             </p>
+            <KindSplit kinds={stats.kinds} />
           </div>
 
           <CategoryCard stats={stats} />
@@ -220,6 +222,26 @@ function percent(part: number, total: number): string {
   return p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`;
 }
 
+// 当月超市购物和外出就餐各花了多少
+function KindSplit({ kinds }: { kinds: MonthlyStats["kinds"] }) {
+  if (kinds.length === 0) return null;
+  return (
+    <div className="mt-3 flex gap-2 border-t border-white/20 pt-3 text-sm">
+      {RECEIPT_KINDS.map((k) => {
+        const row = kinds.find((x) => x.kind === k.kind);
+        return (
+          <div key={k.kind} className="flex-1">
+            <p className="opacity-80">
+              {k.label} · {row?.receipts ?? 0} 次
+            </p>
+            <p className="tabular mt-0.5 text-base font-semibold">{money(row?.total ?? 0)}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function lastDayOfMonth(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return `${month}-${pad(new Date(y, m, 0).getDate())}`;
@@ -238,6 +260,7 @@ function StoreCard({ stats }: { stats: MonthlyStats }) {
       q: "",
       group: "",
       category: "",
+      kind: "",
       store,
     });
     router.push("/");

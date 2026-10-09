@@ -1,4 +1,5 @@
 // 前后端共用的数据结构。
+import type { ReceiptKind } from "./categories";
 
 export type ReceiptItemInput = {
   name: string;
@@ -12,6 +13,7 @@ export type ReceiptItemInput = {
 };
 
 export type ReceiptInput = {
+  kind: ReceiptKind;
   store: string;
   purchased_at: string; // "YYYY-MM-DD HH:MM"
   total: number;
@@ -26,6 +28,7 @@ export type RecognizeResult = ReceiptInput & { is_receipt: boolean; warnings: st
 
 export type ReceiptSummary = {
   id: number;
+  kind: ReceiptKind;
   store: string;
   purchased_at: string;
   total: number;
@@ -51,6 +54,7 @@ export type MonthlyStats = {
   month: string;
   total: number; // 该月实付合计（按小票金额）
   receipts: number;
+  kinds: { kind: ReceiptKind; total: number; receipts: number }[]; // 该月超市 / 餐饮各自的实付合计
   categories: { category: string; amount: number }[]; // 该月各品类金额（按商品金额，未扣整单优惠）
   stores: { store: string; visits: number; total: number }[]; // 该月各店铺实付合计（已合并同一店铺的不同写法）
 };

@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
-import { groupOf } from "@/lib/categories";
+import { groupOf, kindLabel } from "@/lib/categories";
 import { getDb } from "@/lib/db";
 
 export const maxDuration = 60;
@@ -14,13 +14,13 @@ export async function GET() {
 
   const [receipts, items] = await Promise.all([
     db.execute({
-      sql: `SELECT r.id, r.store, r.purchased_at, r.total, r.discount, r.note,
+      sql: `SELECT r.id, r.kind, r.store, r.purchased_at, r.total, r.discount, r.note,
               (SELECT COUNT(*) FROM receipt_items i WHERE i.receipt_id = r.id) AS item_count
             FROM receipts r WHERE r.user_id = ? ORDER BY r.purchased_at, r.id`,
       args: [session.userId],
     }),
     db.execute({
-      sql: `SELECT r.id AS receipt_id, r.store, r.purchased_at, i.name, i.generic_name, i.category,
+      sql: `SELECT r.id AS receipt_id, r.kind, r.store, r.purchased_at, i.name, i.generic_name, i.category,
               i.quantity, i.unit, i.unit_price, i.amount, i.raw_name
             FROM receipt_items i JOIN receipts r ON r.id = i.receipt_id
             WHERE i.user_id = ? ORDER BY r.purchased_at, r.id, i.position`,
@@ -36,6 +36,7 @@ export async function GET() {
   itemSheet.columns = [
     { header: "日期", key: "date", width: 12 },
     { header: "时间", key: "time", width: 8 },
+    { header: "类型", key: "kind", width: 8 },
     { header: "商店", key: "store", width: 26 },
     { header: "商品", key: "name", width: 34 },
     { header: "通用名", key: "generic", width: 12 },
@@ -53,6 +54,7 @@ export async function GET() {
     itemSheet.addRow({
       date: at.slice(0, 10),
       time: at.slice(11, 16),
+      kind: kindLabel(String(r.kind), true),
       store: r.store,
       name: r.name,
       generic: r.generic_name,
@@ -72,6 +74,7 @@ export async function GET() {
     { header: "小票编号", key: "id", width: 9 },
     { header: "日期", key: "date", width: 12 },
     { header: "时间", key: "time", width: 8 },
+    { header: "类型", key: "kind", width: 8 },
     { header: "商店", key: "store", width: 26 },
     { header: "商品数", key: "item_count", width: 8 },
     { header: "整单优惠", key: "discount", width: 10, style: { numFmt: "0.00" } },
@@ -84,6 +87,7 @@ export async function GET() {
       id: Number(r.id),
       date: at.slice(0, 10),
       time: at.slice(11, 16),
+      kind: kindLabel(String(r.kind), true),
       store: r.store,
       item_count: Number(r.item_count),
       discount: Number(r.discount),

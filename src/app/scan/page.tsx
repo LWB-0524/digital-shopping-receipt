@@ -173,7 +173,7 @@ export default function ScanPage() {
           className="pt-3 text-accent"
           onClick={() =>
             setDraft({
-              receipt: { store: "", purchased_at: localDateTime(), total: 0, discount: 0, note: "", items: [] },
+              receipt: { kind: "grocery", store: "", purchased_at: localDateTime(), total: 0, discount: 0, note: "", items: [] },
               warnings: "",
             })
           }

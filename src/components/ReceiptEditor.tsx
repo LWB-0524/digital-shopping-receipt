@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CATEGORY_GROUPS } from "@/lib/categories";
+import { CATEGORY_GROUPS, RECEIPT_KINDS } from "@/lib/categories";
 import { CURRENCY, money, trimNumber } from "@/lib/format";
 import type { ReceiptInput } from "@/lib/types";
 
@@ -22,6 +22,7 @@ let nextKey = 1;
 
 function toDraft(input: ReceiptInput) {
   return {
+    kind: input.kind,
     store: input.store,
     datetime: input.purchased_at.replace(" ", "T"),
     total: trimNumber(input.total),
@@ -97,6 +98,7 @@ export function ReceiptEditor({
     setSaving(true);
     try {
       await onSubmit({
+        kind: draft.kind,
         store: draft.store.trim(),
         purchased_at: draft.datetime.slice(0, 16).replace("T", " "),
         total: toNum(draft.total),
@@ -119,7 +121,9 @@ export function ReceiptEditor({
     }
   }
 
-  const field = "w-full min-w-0 rounded-lg border border-line bg-card px-2.5 py-2 outline-none focus:border-accent";
+  // inputBase 不带宽度，需要固定宽度或自适应宽度的输入框在它基础上单独加，避免和 w-full 冲突
+  const inputBase = "min-w-0 rounded-lg border border-line bg-card px-2.5 py-2 outline-none focus:border-accent";
+  const field = `w-full ${inputBase}`;
   const label = "mb-1 block text-xs text-muted";
 
   return (
@@ -130,8 +134,32 @@ export function ReceiptEditor({
 
       <div className="space-y-3 rounded-xl border border-line bg-card p-4">
         <div>
-          <label className={label}>商店</label>
-          <input className={field} value={draft.store} onChange={(e) => setDraft({ ...draft, store: e.target.value })} placeholder="商店名称" />
+          <span className={label}>类型</span>
+          <div className="flex gap-1 rounded-lg bg-line/60 p-1" role="radiogroup" aria-label="小票类型">
+            {RECEIPT_KINDS.map((k) => (
+              <button
+                key={k.kind}
+                type="button"
+                role="radio"
+                aria-checked={draft.kind === k.kind}
+                onClick={() => setDraft({ ...draft, kind: k.kind })}
+                className={`flex-1 rounded-md py-1.5 text-sm ${
+                  draft.kind === k.kind ? "bg-card font-medium text-ink shadow-sm" : "text-muted"
+                }`}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className={label}>{draft.kind === "dining" ? "餐厅" : "商店"}</label>
+          <input
+            className={field}
+            value={draft.store}
+            onChange={(e) => setDraft({ ...draft, store: e.target.value })}
+            placeholder={draft.kind === "dining" ? "餐厅名称" : "商店名称"}
+          />
         </div>
         <div>
           <label className={label}>购买时间</label>
@@ -166,14 +194,14 @@ export function ReceiptEditor({
             <li key={it.key} className="space-y-2 rounded-xl border border-line bg-card p-3">
               <div className="flex gap-2">
                 <input
-                  className={`${field} flex-1`}
+                  className={`${inputBase} flex-1`}
                   value={it.name}
                   onChange={(e) => setItem(it.key, { name: e.target.value })}
                   placeholder="商品名称"
                   aria-label="商品名称"
                 />
                 <input
-                  className={`${field} w-20 shrink-0`}
+                  className={`${inputBase} w-20 shrink-0`}
                   value={it.generic_name}
                   onChange={(e) => setItem(it.key, { generic_name: e.target.value })}
                   placeholder="通用名"
@@ -225,7 +253,7 @@ export function ReceiptEditor({
               ...draft,
               items: [
                 ...draft.items,
-                { key: nextKey++, name: "", raw_name: "", generic_name: "", category: "其他", quantity: "1", unit: "", unit_price: "", amount: "" },
+                { key: nextKey++, name: "", raw_name: "", generic_name: "", category: draft.kind === "dining" ? "正餐" : "其他", quantity: "1", unit: "", unit_price: "", amount: "" },
               ],
             })
           }

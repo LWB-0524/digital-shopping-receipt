@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ClientOnly } from "@/components/ClientOnly";
+import { KindBadge } from "@/components/KindBadge";
 import { FilterBar, filterQuery, loadFilters, saveFilters, type FilterState } from "@/components/FilterBar";
 import { useDebounced } from "@/components/useDebounced";
 import { api, dateLabel, money, trimNumber } from "@/lib/format";
@@ -117,6 +118,7 @@ function ReceiptGroups({ receipts }: { receipts: ReceiptSummary[] }) {
                     <div className="flex items-baseline gap-2">
                       <span className="truncate font-medium">{r.store || "未命名商店"}</span>
                       <span className="shrink-0 text-xs text-muted">{r.purchased_at.slice(11)}</span>
+                      {r.kind === "dining" && <KindBadge kind={r.kind} />}
                     </div>
                     <p className="mt-0.5 truncate text-sm text-muted">
                       {r.item_count} 件 · {r.preview}

@@ -1,6 +1,7 @@
 import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
+import { isDiningCategory, isReceiptKind, type ReceiptKind } from "./categories";
 import { getDb } from "./db";
 import type {
   ItemRow,
@@ -19,6 +20,7 @@ export type Filters = {
   group?: string;
   category?: string;
   store?: string; // 店铺名：手动合并过的用合并后的名称，否则就是小票上的店名
+  kind?: ReceiptKind; // 超市购物 / 外出就餐
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -34,6 +36,7 @@ export function filtersFromSearchParams(params: URLSearchParams): Filters {
     group: pick("group"),
     category: pick("category"),
     store: pick("store")?.slice(0, 100),
+    kind: isReceiptKind(pick("kind")) ? (pick("kind") as ReceiptKind) : undefined,
   };
 }
 
@@ -50,6 +53,10 @@ async function storeCondition(userId: number, store: string | undefined, args: I
 // 把筛选条件转换为针对 receipt_items 别名 i、receipts 别名 r 的 SQL 片段
 function itemConditions(f: Filters, args: InArgs & unknown[]): string[] {
   const where: string[] = [];
+  if (f.kind) {
+    where.push("r.kind = ?");
+    args.push(f.kind);
+  }
   if (f.from) {
     where.push("r.purchased_at >= ?");
     args.push(f.from);
@@ -83,7 +90,7 @@ export async function listReceipts(userId: number, f: Filters): Promise<ReceiptS
   const db = await getDb();
   const args: unknown[] & InArgs = [userId];
   const where = ["r.user_id = ?"];
-  const itemWhere = itemConditions({ ...f, from: undefined, to: undefined }, args);
+  const itemWhere = itemConditions({ ...f, from: undefined, to: undefined, kind: undefined }, args);
   if (itemWhere.length > 0) {
     // 小票里至少有一个商品满足条件（店名搜索也走这里）
     where.push(`EXISTS (SELECT 1 FROM receipt_items i WHERE i.receipt_id = r.id AND ${itemWhere.join(" AND ")})`);
@@ -96,9 +103,13 @@ export async function listReceipts(userId: number, f: Filters): Promise<ReceiptS
     where.push("r.purchased_at <= ?");
     args.push(`${f.to} 99:99`);
   }
+  if (f.kind) {
+    where.push("r.kind = ?");
+    args.push(f.kind);
+  }
   where.push(...(await storeCondition(userId, f.store, args)));
   const rs = await db.execute({
-    sql: `SELECT r.id, r.store, r.purchased_at, r.total,
+    sql: `SELECT r.id, r.kind, r.store, r.purchased_at, r.total,
             (SELECT COUNT(*) FROM receipt_items i WHERE i.receipt_id = r.id) AS item_count,
             (SELECT group_concat(name, '、') FROM (
                SELECT name FROM receipt_items i WHERE i.receipt_id = r.id ORDER BY position LIMIT 4)) AS preview
@@ -110,6 +121,7 @@ export async function listReceipts(userId: number, f: Filters): Promise<ReceiptS
   });
   return rs.rows.map((row) => ({
     id: Number(row.id),
+    kind: toKind(row.kind),
     store: String(row.store ?? ""),
     purchased_at: String(row.purchased_at),
     total: Number(row.total),
@@ -162,6 +174,7 @@ export async function getReceipt(userId: number, id: number): Promise<ReceiptDet
   if (!row) return null;
   return {
     id,
+    kind: toKind(row.kind),
     store: String(row.store ?? ""),
     purchased_at: String(row.purchased_at),
     total: Number(row.total),
@@ -223,8 +236,8 @@ export async function createReceipt(userId: number, input: ReceiptInput, images:
   const tx = await db.transaction("write");
   try {
     const rs = await tx.execute({
-      sql: `INSERT INTO receipts (user_id, store, purchased_at, total, discount, note) VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [userId, input.store, input.purchased_at, input.total, input.discount, input.note],
+      sql: `INSERT INTO receipts (user_id, kind, store, purchased_at, total, discount, note) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [userId, input.kind, input.store, input.purchased_at, input.total, input.discount, input.note],
     });
     const receiptId = Number(rs.lastInsertRowid);
     await insertItems(tx, userId, receiptId, input);
@@ -247,8 +260,9 @@ export async function updateReceipt(userId: number, id: number, input: ReceiptIn
   const tx = await db.transaction("write");
   try {
     const rs = await tx.execute({
-      sql: `UPDATE receipts SET store = ?, purchased_at = ?, total = ?, discount = ?, note = ? WHERE id = ? AND user_id = ?`,
-      args: [input.store, input.purchased_at, input.total, input.discount, input.note, id, userId],
+      sql: `UPDATE receipts SET kind = ?, store = ?, purchased_at = ?, total = ?, discount = ?, note = ?
+            WHERE id = ? AND user_id = ?`,
+      args: [input.kind, input.store, input.purchased_at, input.total, input.discount, input.note, id, userId],
     });
     if (rs.rowsAffected === 0) return false;
     await tx.execute({ sql: "DELETE FROM receipt_items WHERE receipt_id = ? AND user_id = ?", args: [id, userId] });
@@ -299,6 +313,7 @@ export async function applyCategoryRules<
 >(
   userId: number,
   items: T[],
+  kind: ReceiptKind = "grocery",
 ): Promise<T[]> {
   const names = [...new Set(items.flatMap((it) => [it.name, it.raw_name]).filter(Boolean))];
   if (names.length === 0) return items;
@@ -314,7 +329,8 @@ export async function applyCategoryRules<
     const byRaw = rules.get(it.raw_name);
     const byName = rules.get(it.name);
     const rule = byRaw ?? byName;
-    if (!rule) return it;
+    // 记住的品类只在同一类小票里套用：超市品类不会套到餐饮小票上，反之亦然
+    if (!rule || isDiningCategory(rule.category) !== (kind === "dining")) return it;
     const generic = byRaw?.generic_name || byName?.generic_name || it.generic_name;
     return { ...it, category: rule.category, generic_name: generic };
   });
@@ -332,7 +348,7 @@ export async function monthlyStats(userId: number, month: string, end: string): 
   if (!MONTH_RE.test(month) || !MONTH_RE.test(end)) return "月份格式应为 YYYY-MM";
   const db = await getDb();
   const start = shiftMonth(end, -11);
-  const [trend, cats, stores] = await Promise.all([
+  const [trend, cats, stores, kinds] = await Promise.all([
     db.execute({
       sql: `SELECT substr(purchased_at, 1, 7) AS month, SUM(total) AS total, COUNT(*) AS n
             FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) BETWEEN ? AND ?
@@ -349,6 +365,11 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     db.execute({
       sql: `SELECT store, COUNT(*) AS visits, SUM(total) AS total, MAX(purchased_at) AS last
             FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) = ? GROUP BY store`,
+      args: [userId, month],
+    }),
+    db.execute({
+      sql: `SELECT kind, SUM(total) AS total, COUNT(*) AS n
+            FROM receipts WHERE user_id = ? AND substr(purchased_at, 1, 7) = ? GROUP BY kind`,
       args: [userId, month],
     }),
   ]);
@@ -371,6 +392,7 @@ export async function monthlyStats(userId: number, month: string, end: string): 
     total: selected.total,
     receipts: selected.receipts,
     categories: cats.rows.map((r) => ({ category: String(r.category), amount: Number(r.amount) })),
+    kinds: kinds.rows.map((r) => ({ kind: toKind(r.kind), total: Number(r.total), receipts: Number(r.n) })),
     stores: mergeStores(
       await storeNames(userId),
       stores.rows.map((r) => ({
@@ -448,6 +470,10 @@ export async function listStores(userId: number, f: Filters): Promise<StoreSumma
     where.push("purchased_at <= ?");
     args.push(`${f.to} 99:99`);
   }
+  if (f.kind) {
+    where.push("kind = ?");
+    args.push(f.kind);
+  }
   const rs = await db.execute({
     sql: `SELECT store, COUNT(*) AS visits, SUM(total) AS total, MAX(purchased_at) AS last
           FROM receipts WHERE ${where.join(" AND ")} GROUP BY store`,
@@ -524,4 +550,23 @@ export async function mergeStoreNames(userId: number, stores: string[], canonica
 export async function unmergeStore(userId: number, canonical: string): Promise<void> {
   const db = await getDb();
   await db.execute({ sql: "DELETE FROM store_aliases WHERE user_id = ? AND canonical = ?", args: [userId, canonical] });
+}
+
+function toKind(value: unknown): ReceiptKind {
+  return isReceiptKind(value) ? value : "grocery";
+}
+
+// 读出某张小票保存的全部照片（用于重新识别）
+export async function getReceiptImages(userId: number, receiptId: number): Promise<UploadImage[]> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `SELECT img.media_type, img.data FROM receipt_images img
+          JOIN receipts r ON r.id = img.receipt_id
+          WHERE img.receipt_id = ? AND r.user_id = ? ORDER BY img.position`,
+    args: [receiptId, userId],
+  });
+  return rs.rows.map((row) => ({
+    media_type: String(row.media_type) as UploadImage["media_type"],
+    data: Buffer.from(row.data as ArrayBuffer).toString("base64"),
+  }));
 }

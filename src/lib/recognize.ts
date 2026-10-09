@@ -8,10 +8,11 @@ export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 
 const categoryGuide = CATEGORY_GROUPS.map((g) => `${g.group}：${g.categories.join("、")}`).join("\n");
 
-const SYSTEM_PROMPT = `你是购物小票识别助手。用户会上传一张或多张超市/商店购物小票的照片（多张时是同一张长小票分段拍摄，按顺序拼接，注意去掉重叠部分的重复商品）。
+const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或多张小票的照片，可能是超市/商店的购物小票，也可能是餐厅、咖啡店、外卖等外出就餐的小票（多张时是同一张长小票分段拍摄，按顺序拼接，注意去掉重叠部分的重复商品）。
 请把小票整理成结构化数据：
 
-- store：商店名称（含分店名），看不清就留空字符串。
+- kind：小票类型。超市、商店购物填 "grocery"；餐厅、咖啡店、快餐店、奶茶店、外卖等餐饮消费填 "dining"。
+- store：商店或餐厅名称（含分店名），看不清就留空字符串。
 - purchased_at：购买时间，格式 "YYYY-MM-DD HH:MM"。小票上没有年份时按用户给出的今天日期推断；完全没有时间时留空字符串。
 - total：实际支付金额（应付/实付合计）。
 - discount：整单层面的优惠合计（会员折扣、满减、优惠券等），为非负数；已经体现在单个商品金额里的优惠不要重复计入。
@@ -25,6 +26,8 @@ const SYSTEM_PROMPT = `你是购物小票识别助手。用户会上传一张或
   - unit_price：单价。
   - amount：该行实际金额（若该行有单品优惠，填优惠后的金额）。
   - 购物袋也算一条商品，归入"日用品"。不要把小计、合计、找零、支付方式、积分等当作商品。
+  - 餐饮小票（kind 为 "dining"）：每道菜、每杯饮品各一条，品类从"外出就餐"大类里选（如越南粉、汉堡归"正餐"或"快餐小吃"，咖啡奶茶归"咖啡茶饮"）；name 用中文菜名，必要时保留原文菜名，如"牛肉河粉 Pho Bo"；generic_name 用菜品通用叫法，如"越南粉"、"拿铁"。
+  - 周末/节假日附加费（surcharge）、刷卡手续费、服务费、小费（tip）如果计入了实付金额，各单独列一条，归入"服务费小费"。GST 等已含在价格里的税不要单独列。
 - warnings：看不清、可能识别错或金额对不上的地方，用一两句中文说明；没有就留空字符串。
 - is_receipt：图片不是购物小票时设为 false，其他字段给空值即可。
 
@@ -36,9 +39,10 @@ ${categoryGuide}
 const RESULT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["is_receipt", "store", "purchased_at", "total", "discount", "items", "warnings"],
+  required: ["is_receipt", "kind", "store", "purchased_at", "total", "discount", "items", "warnings"],
   properties: {
     is_receipt: { type: "boolean" },
+    kind: { type: "string", enum: ["grocery", "dining"] },
     store: { type: "string" },
     purchased_at: { type: "string", description: 'YYYY-MM-DD HH:MM，未知时为 ""' },
     total: { type: "number" },
@@ -89,6 +93,7 @@ export async function recognizeReceipt(
   knownStores: string[] = [],
 ): Promise<RecognizeResult> {
   if (process.env.RECOGNIZE_MOCK === "1") return mockResult(today);
+  if (process.env.RECOGNIZE_MOCK === "dining") return mockDining(today);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
@@ -183,6 +188,7 @@ function joinWarnings(...parts: unknown[]): string {
 function mockResult(today: string): RecognizeResult {
   return {
     is_receipt: true,
+    kind: "grocery",
     store: "示例超市（演示数据）",
     purchased_at: today,
     total: 60.53,
@@ -194,6 +200,24 @@ function mockResult(today: string): RecognizeResult {
       { raw_name: "乐事薯片原味70G", generic_name: "薯片", name: "乐事薯片 原味 70g", category: "零食", quantity: 2, unit: "袋", unit_price: 7.5, amount: 15 },
       { raw_name: "西红柿", generic_name: "西红柿", name: "西红柿", category: "蔬菜水果", quantity: 0.85, unit: "kg", unit_price: 9.8, amount: 8.33 },
       { raw_name: "购物袋", generic_name: "购物袋", name: "购物袋", category: "日用品", quantity: 1, unit: "个", unit_price: 0.3, amount: 0.3 },
+    ],
+  };
+}
+
+function mockDining(today: string): RecognizeResult {
+  return {
+    is_receipt: true,
+    kind: "dining",
+    store: "Pho Vietnam（演示数据）",
+    purchased_at: today,
+    total: 27.6,
+    discount: 0,
+    note: "",
+    warnings: "这是 RECOGNIZE_MOCK=dining 生成的演示数据",
+    items: [
+      { raw_name: "Pho Bo (L)", generic_name: "越南粉", name: "牛肉河粉 Pho Bo（大）", category: "正餐", quantity: 1, unit: "份", unit_price: 19.5, amount: 19.5 },
+      { raw_name: "Vietnamese Iced Coffee", generic_name: "越南咖啡", name: "越南冰咖啡", category: "咖啡茶饮", quantity: 1, unit: "杯", unit_price: 6.5, amount: 6.5 },
+      { raw_name: "Card Surcharge", generic_name: "刷卡手续费", name: "刷卡手续费", category: "服务费小费", quantity: 1, unit: "", unit_price: 1.6, amount: 1.6 },
     ],
   };
 }

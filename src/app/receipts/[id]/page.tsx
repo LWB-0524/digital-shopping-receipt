@@ -4,17 +4,20 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { KindBadge } from "@/components/KindBadge";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { groupOf } from "@/lib/categories";
-import { api, dateLabel, money, trimNumber } from "@/lib/format";
-import type { ReceiptDetail, ReceiptInput } from "@/lib/types";
+import { api, dateLabel, localDateTime, money, trimNumber } from "@/lib/format";
+import type { ReceiptDetail, ReceiptInput, RecognizeResult } from "@/lib/types";
 
 export default function ReceiptPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [receipt, setReceipt] = useState<ReceiptDetail | null>(null);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState(false);
+  // 正在编辑时的初始内容：手动编辑用当前小票，重新识别用识别结果
+  const [editing, setEditing] = useState<{ initial: ReceiptInput; warnings?: string; title: string } | null>(null);
+  const [recognizing, setRecognizing] = useState(false);
 
   useEffect(() => {
     api<ReceiptDetail>(`/api/receipts/${id}`)
@@ -25,7 +28,28 @@ export default function ReceiptPage() {
   async function save(input: ReceiptInput) {
     await api(`/api/receipts/${id}`, { method: "PUT", body: JSON.stringify({ receipt: input }) });
     setReceipt(await api<ReceiptDetail>(`/api/receipts/${id}`));
-    setEditing(false);
+    setEditing(null);
+  }
+
+  async function recognizeAgain() {
+    if (!receipt) return;
+    setError("");
+    setRecognizing(true);
+    try {
+      const result = await api<RecognizeResult>(`/api/receipts/${id}/recognize`, {
+        method: "POST",
+        body: JSON.stringify({ today: localDateTime() }),
+      });
+      setEditing({
+        initial: { ...result, note: receipt.note },
+        warnings: result.warnings,
+        title: "确认重新识别结果",
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRecognizing(false);
+    }
   }
 
   async function remove() {
@@ -54,8 +78,15 @@ export default function ReceiptPage() {
 
   if (editing) {
     return (
-      <AppShell title="编辑小票">
-        <ReceiptEditor initial={receipt} submitLabel="保存修改" onSubmit={save} onCancel={() => setEditing(false)} />
+      <AppShell title={editing.title}>
+        <p className="mb-3 text-sm text-muted">保存后会覆盖这张小票原来的内容。</p>
+        <ReceiptEditor
+          initial={editing.initial}
+          warnings={editing.warnings}
+          submitLabel="保存修改"
+          onSubmit={save}
+          onCancel={() => setEditing(null)}
+        />
       </AppShell>
     );
   }
@@ -66,7 +97,10 @@ export default function ReceiptPage() {
     <AppShell title="小票详情" action={back}>
       <div className="space-y-4">
         <div className="rounded-xl border border-line bg-card p-4">
-          <h2 className="text-lg font-semibold">{receipt.store || "未命名商店"}</h2>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="min-w-0 text-lg font-semibold">{receipt.store || "未命名商店"}</h2>
+            <KindBadge kind={receipt.kind} />
+          </div>
           <p className="mt-0.5 text-sm text-muted">
             {dateLabel(receipt.purchased_at.slice(0, 10))} {receipt.purchased_at.slice(11)}
           </p>
@@ -128,10 +162,24 @@ export default function ReceiptPage() {
           <button type="button" className="flex-1 rounded-lg border border-line bg-card py-2.5 text-danger" onClick={remove}>
             删除
           </button>
-          <button type="button" className="flex-[2] rounded-lg bg-accent py-2.5 font-medium text-white" onClick={() => setEditing(true)}>
+          <button
+            type="button"
+            className="flex-[2] rounded-lg bg-accent py-2.5 font-medium text-white"
+            onClick={() => setEditing({ initial: receipt, title: "编辑小票" })}
+          >
             编辑
           </button>
         </div>
+        {receipt.image_count > 0 && (
+          <button
+            type="button"
+            className="w-full rounded-lg border border-accent py-2.5 text-accent disabled:opacity-60"
+            onClick={recognizeAgain}
+            disabled={recognizing}
+          >
+            {recognizing ? "正在重新识别，大约需要 10～40 秒…" : "用原图重新识别"}
+          </button>
+        )}
       </div>
     </AppShell>
   );
