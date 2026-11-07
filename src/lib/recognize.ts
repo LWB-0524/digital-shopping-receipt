@@ -29,6 +29,7 @@ const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或
   - 购物袋也算一条商品，归入"日用品"。不要把小计、合计、找零、支付方式、积分等当作商品。
   - 餐饮小票（kind 为 "dining"）：每道菜、每杯饮品各一条，品类从"外出就餐"大类里选（如越南粉、汉堡归"正餐"或"快餐小吃"，咖啡奶茶归"咖啡茶饮"）；name 用中文菜名，必要时保留原文菜名，如"牛肉河粉 Pho Bo"；generic_name 用菜品通用叫法，如"越南粉"、"拿铁"。
   - 其他支出小票（kind 为 "other"）：品类从"交通出行""生活服务"大类里选。
+  - 加油站小票（Z、BP、Mobil、Gull、Waitomo 等）kind 填 "other"。燃油那一行：quantity 填升数，unit 填 "L"，unit_price 填每升单价，amount 填该行金额，品类"加油充电"；name 和 generic_name 都只写油品（升数已在 quantity 里，不要写进名称，方便多次加油放在一起比价）："汽油 91"、"汽油 95"、"汽油 98"或"柴油"，电动车充电写"充电"。每升优惠（如超市加油券、AA Smartfuel 的 "6c/L discount"）只体现在燃油这一行的金额里，不要再计入 discount，并在 warnings 里写明优惠了多少。同一张小票上的零食饮料按原品类单独列，洗车、WOF、车辆注册、保养维修归"车辆保养"。加油机号、里程等不是商品，不要列。
   - 付款记录截图（没有商品明细）：store 填整理后易读的收款方名称（如 "ANTHROPIC* CLAUDE SU" 整理为 "Anthropic"，"Laundromatic" 保持原样），purchased_at 用交易日期时间，total 用扣款金额（取正数）。items 只放一条：name 写这笔钱的用途（如"Claude 订阅"、"自助洗衣"、"AT HOP 充值"），raw_name 填截图上的收款方原文，quantity 为 1，unit_price 和 amount 都等于扣款金额，按收款方判断 kind 和品类（超市填 grocery、餐厅填 dining、其他填 other）。warnings 写"这是付款记录，没有商品明细"，判断不出用途时再补一句请用户确认品类。截图里的账号、卡号、Particulars、Code、Reference 等信息一律不要输出。
   - 周末/节假日附加费（surcharge）、刷卡手续费、服务费、小费（tip）如果计入了实付金额，各单独列一条，归入"服务费小费"。GST 等已含在价格里的税不要单独列。
 - warnings：看不清、可能识别错或金额对不上的地方，用一两句中文说明；没有就留空字符串。
@@ -100,6 +101,7 @@ export async function recognizeReceipt(
   if (process.env.RECOGNIZE_MOCK === "1") return mockResult(today);
   if (process.env.RECOGNIZE_MOCK === "dining") return mockDining(today);
   if (process.env.RECOGNIZE_MOCK === "payment") return mockPayment(today);
+  if (process.env.RECOGNIZE_MOCK === "fuel") return mockFuel(today);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
@@ -243,6 +245,24 @@ function mockPayment(today: string): RecognizeResult {
     warnings: "这是付款记录，没有商品明细",
     items: [
       { raw_name: "Laundromatic", generic_name: "洗衣", name: "自助洗衣", category: "洗衣家政", quantity: 1, unit: "", unit_price: 4.04, amount: 4.04 },
+    ],
+  };
+}
+
+function mockFuel(today: string): RecognizeResult {
+  return {
+    is_receipt: true,
+    kind: "other",
+    store: "Z Glenfield（演示数据）",
+    purchased_at: today,
+    total: 112.9,
+    discount: 0,
+    note: "",
+    warnings: "燃油每升优惠 6c，已体现在燃油金额里（这是演示数据）",
+    items: [
+      { raw_name: "91 Unleaded 38.52L @ 2.659", generic_name: "汽油 91", name: "汽油 91", category: "加油充电", quantity: 38.52, unit: "L", unit_price: 2.599, amount: 100.11 },
+      { raw_name: "Pump Car Wash", generic_name: "洗车", name: "自助洗车", category: "车辆保养", quantity: 1, unit: "次", unit_price: 10, amount: 10 },
+      { raw_name: "Coke 600ml", generic_name: "可乐", name: "可口可乐 600ml", category: "饮料", quantity: 1, unit: "瓶", unit_price: 2.79, amount: 2.79 },
     ],
   };
 }
