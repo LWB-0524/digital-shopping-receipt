@@ -1,7 +1,7 @@
 import "server-only";
 import type { InArgs, Transaction } from "@libsql/client";
 import { categoriesInGroup } from "./categories";
-import { isDiningCategory, isReceiptKind, type ReceiptKind } from "./categories";
+import { categoryFitsKind, isReceiptKind, type ReceiptKind } from "./categories";
 import { getDb } from "./db";
 import type {
   ItemRow,
@@ -330,7 +330,7 @@ export async function applyCategoryRules<
     const byName = rules.get(it.name);
     const rule = byRaw ?? byName;
     // 记住的品类只在同一类小票里套用：超市品类不会套到餐饮小票上，反之亦然
-    if (!rule || isDiningCategory(rule.category) !== (kind === "dining")) return it;
+    if (!rule || !categoryFitsKind(rule.category, kind)) return it;
     const generic = byRaw?.generic_name || byName?.generic_name || it.generic_name;
     return { ...it, category: rule.category, generic_name: generic };
   });

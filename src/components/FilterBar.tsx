@@ -10,7 +10,7 @@ export type FilterState = {
   group: string;
   category: string;
   store: string;
-  kind: string; // "" 全部 / grocery 超市 / dining 餐饮
+  kind: string; // "" 全部 / grocery 超市 / dining 餐饮 / other 其他支出
 };
 
 export function defaultFilters(): FilterState {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CATEGORY_GROUPS, RECEIPT_KINDS } from "@/lib/categories";
+import { CATEGORY_GROUPS, defaultCategory, RECEIPT_KINDS, type ReceiptKind } from "@/lib/categories";
 import { CURRENCY, money, trimNumber } from "@/lib/format";
 import type { ReceiptInput } from "@/lib/types";
 
@@ -20,12 +20,19 @@ type DraftItem = {
 
 let nextKey = 1;
 
+const STORE_LABEL: Record<ReceiptKind, { label: string; placeholder: string }> = {
+  grocery: { label: "商店", placeholder: "商店名称" },
+  dining: { label: "餐厅", placeholder: "餐厅名称" },
+  other: { label: "商家 / 收款方", placeholder: "如 Auckland Transport、Anthropic" },
+};
+
 function toDraft(input: ReceiptInput) {
   return {
     kind: input.kind,
     store: input.store,
     datetime: input.purchased_at.replace(" ", "T"),
-    total: trimNumber(input.total),
+    // 金额为 0 时留空，保存时按商品合计自动填
+    total: input.total === 0 ? "" : trimNumber(input.total),
     discount: trimNumber(input.discount),
     note: input.note,
     items: input.items.map(
@@ -37,8 +44,8 @@ function toDraft(input: ReceiptInput) {
         category: it.category,
         quantity: trimNumber(it.quantity),
         unit: it.unit,
-        unit_price: trimNumber(it.unit_price),
-        amount: trimNumber(it.amount),
+        unit_price: it.unit_price === 0 ? "" : trimNumber(it.unit_price),
+        amount: it.amount === 0 ? "" : trimNumber(it.amount),
       }),
     ),
   };
@@ -82,7 +89,8 @@ export function ReceiptEditor({
 
   const itemsSum = draft.items.reduce((s, it) => s + toNum(it.amount), 0);
   const expected = itemsSum - toNum(draft.discount);
-  const mismatch = draft.items.length > 0 && Math.abs(expected - toNum(draft.total)) > 0.05;
+  const totalBlank = draft.total.trim() === "";
+  const mismatch = !totalBlank && draft.items.length > 0 && Math.abs(expected - toNum(draft.total)) > 0.05;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -101,7 +109,7 @@ export function ReceiptEditor({
         kind: draft.kind,
         store: draft.store.trim(),
         purchased_at: draft.datetime.slice(0, 16).replace("T", " "),
-        total: toNum(draft.total),
+        total: totalBlank ? Math.round(expected * 100) / 100 : toNum(draft.total),
         discount: toNum(draft.discount),
         note: draft.note.trim(),
         items: draft.items.map((it) => ({
@@ -153,12 +161,12 @@ export function ReceiptEditor({
           </div>
         </div>
         <div>
-          <label className={label}>{draft.kind === "dining" ? "餐厅" : "商店"}</label>
+          <label className={label}>{STORE_LABEL[draft.kind].label}</label>
           <input
             className={field}
             value={draft.store}
             onChange={(e) => setDraft({ ...draft, store: e.target.value })}
-            placeholder={draft.kind === "dining" ? "餐厅名称" : "商店名称"}
+            placeholder={STORE_LABEL[draft.kind].placeholder}
           />
         </div>
         <div>
@@ -174,7 +182,13 @@ export function ReceiptEditor({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={label}>实付合计（{CURRENCY}）</label>
-            <input className={field} inputMode="decimal" value={draft.total} onChange={(e) => setDraft({ ...draft, total: e.target.value })} />
+            <input
+              className={field}
+              inputMode="decimal"
+              value={draft.total}
+              placeholder="留空按商品合计"
+              onChange={(e) => setDraft({ ...draft, total: e.target.value })}
+            />
           </div>
           <div>
             <label className={label}>整单优惠（{CURRENCY}）</label>
@@ -183,7 +197,7 @@ export function ReceiptEditor({
         </div>
         <p className={`text-xs ${mismatch ? "text-warn" : "text-muted"}`}>
           商品合计 {money(itemsSum)} − 优惠 {money(toNum(draft.discount))} = {money(expected)}
-          {mismatch ? "，与实付合计不一致，请核对" : " ✓"}
+          {totalBlank ? "，保存时作为实付合计" : mismatch ? "，与实付合计不一致，请核对" : " ✓"}
         </p>
       </div>
 
@@ -253,7 +267,7 @@ export function ReceiptEditor({
               ...draft,
               items: [
                 ...draft.items,
-                { key: nextKey++, name: "", raw_name: "", generic_name: "", category: draft.kind === "dining" ? "正餐" : "其他", quantity: "1", unit: "", unit_price: "", amount: "" },
+                { key: nextKey++, name: "", raw_name: "", generic_name: "", category: defaultCategory(draft.kind), quantity: "1", unit: "", unit_price: "", amount: "" },
               ],
             })
           }

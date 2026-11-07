@@ -11,7 +11,7 @@ const categoryGuide = CATEGORY_GROUPS.map((g) => `${g.group}：${g.categories.jo
 const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或多张小票的照片，可能是超市/商店的购物小票，也可能是餐厅、咖啡店、外卖等外出就餐的小票（多张时是同一张长小票分段拍摄，按顺序拼接，注意去掉重叠部分的重复商品）。
 请把小票整理成结构化数据：
 
-- kind：小票类型。超市、商店购物填 "grocery"；餐厅、咖啡店、快餐店、奶茶店、外卖等餐饮消费填 "dining"。
+- kind：小票类型。超市、商店购物填 "grocery"；餐厅、咖啡店、快餐店、奶茶店、外卖等餐饮消费填 "dining"；交通（公交充值、打车、加油、停车）、订阅会员、话费网费、水电燃气、医疗等其他支出填 "other"。
 - store：商店或餐厅名称（含分店名），看不清就留空字符串。
 - purchased_at：购买时间，格式 "YYYY-MM-DD HH:MM"。小票上没有年份时按用户给出的今天日期推断；完全没有时间时留空字符串。
 - total：实际支付金额（应付/实付合计）。
@@ -27,6 +27,7 @@ const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或
   - amount：该行实际金额（若该行有单品优惠，填优惠后的金额）。
   - 购物袋也算一条商品，归入"日用品"。不要把小计、合计、找零、支付方式、积分等当作商品。
   - 餐饮小票（kind 为 "dining"）：每道菜、每杯饮品各一条，品类从"外出就餐"大类里选（如越南粉、汉堡归"正餐"或"快餐小吃"，咖啡奶茶归"咖啡茶饮"）；name 用中文菜名，必要时保留原文菜名，如"牛肉河粉 Pho Bo"；generic_name 用菜品通用叫法，如"越南粉"、"拿铁"。
+  - 其他支出小票（kind 为 "other"）：品类从"交通出行""生活服务"大类里选。
   - 周末/节假日附加费（surcharge）、刷卡手续费、服务费、小费（tip）如果计入了实付金额，各单独列一条，归入"服务费小费"。GST 等已含在价格里的税不要单独列。
 - warnings：看不清、可能识别错或金额对不上的地方，用一两句中文说明；没有就留空字符串。
 - is_receipt：图片不是购物小票时设为 false，其他字段给空值即可。
@@ -42,7 +43,7 @@ const RESULT_SCHEMA = {
   required: ["is_receipt", "kind", "store", "purchased_at", "total", "discount", "items", "warnings"],
   properties: {
     is_receipt: { type: "boolean" },
-    kind: { type: "string", enum: ["grocery", "dining"] },
+    kind: { type: "string", enum: ["grocery", "dining", "other"] },
     store: { type: "string" },
     purchased_at: { type: "string", description: 'YYYY-MM-DD HH:MM，未知时为 ""' },
     total: { type: "number" },

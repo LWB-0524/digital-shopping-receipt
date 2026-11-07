@@ -16,6 +16,8 @@ const GROUP_COLORS: Record<string, string> = {
   零食饮料: "#eb6834",
   日用百货: "#1baf7a",
   外出就餐: "#4a3aa7",
+  交通出行: "#e87ba4",
+  生活服务: "#008300",
   其他: "#eda100",
 };
 const BAR = "#2a78d6";

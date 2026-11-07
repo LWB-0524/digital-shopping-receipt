@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
+import { defaultCategory } from "@/lib/categories";
 import { api, ApiError, localDateTime, money } from "@/lib/format";
 import { compressImage } from "@/lib/image";
 import type { ReceiptInput, RecognizeResult, UploadImage } from "@/lib/types";
@@ -19,7 +20,7 @@ export default function ScanPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [busy, setBusy] = useState<"" | "compress" | "recognize">("");
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState<{ receipt: ReceiptInput; warnings: string } | null>(null);
+  const [draft, setDraft] = useState<{ receipt: ReceiptInput; warnings: string; manual?: boolean } | null>(null);
 
   async function addFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -78,7 +79,7 @@ export default function ScanPage() {
 
   if (draft) {
     return (
-      <AppShell title="确认识别结果">
+      <AppShell title={draft.manual ? "手动记一笔" : "确认识别结果"}>
         {photos.length > 0 && <PhotoStrip photos={photos} />}
         <ReceiptEditor
           initial={draft.receipt}
@@ -173,12 +174,33 @@ export default function ScanPage() {
           className="pt-3 text-accent"
           onClick={() =>
             setDraft({
-              receipt: { kind: "grocery", store: "", purchased_at: localDateTime(), total: 0, discount: 0, note: "", items: [] },
+              // 手动记录多是没有小票的支出（交通、订阅等），默认"其他支出"，先放一行空白项目
+              receipt: {
+                kind: "other",
+                store: "",
+                purchased_at: localDateTime(),
+                total: 0,
+                discount: 0,
+                note: "",
+                items: [
+                  {
+                    name: "",
+                    raw_name: "",
+                    generic_name: "",
+                    category: defaultCategory("other"),
+                    quantity: 1,
+                    unit: "",
+                    unit_price: 0,
+                    amount: 0,
+                  },
+                ],
+              },
               warnings: "",
+              manual: true,
             })
           }
         >
-          没有小票？手动记一笔
+          没有小票？手动记一笔（交通、订阅、账单等）
         </button>
       </div>
     </AppShell>
