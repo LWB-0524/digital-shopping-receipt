@@ -116,6 +116,7 @@ export default function ScanPage() {
           </svg>
           <span className="text-base font-medium">{busy === "compress" ? "处理照片中…" : "拍照或从相册选择"}</span>
           <span className="text-xs text-muted">小票很长时可以分段拍，最多 {MAX_IMAGES} 张</span>
+          <span className="text-xs text-muted">没有小票时，也可以上传银行 App 的单笔交易截图</span>
         </button>
       ) : (
         <div className="space-y-4">
@@ -167,6 +168,7 @@ export default function ScanPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>把小票放平，在光线充足的地方拍，避免反光</li>
           <li>让小票占满画面，文字越清楚识别越准</li>
+          <li>没有小票（交通充值、订阅、自助洗衣等）时，在银行 App 里点开那笔交易，截图上传即可；请截单笔交易的详情页，不要截整个流水列表</li>
           <li>识别后可以逐项检查修改，确认无误再保存</li>
         </ul>
         <button

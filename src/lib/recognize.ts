@@ -8,7 +8,8 @@ export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 
 const categoryGuide = CATEGORY_GROUPS.map((g) => `${g.group}：${g.categories.join("、")}`).join("\n");
 
-const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或多张小票的照片，可能是超市/商店的购物小票，也可能是餐厅、咖啡店、外卖等外出就餐的小票（多张时是同一张长小票分段拍摄，按顺序拼接，注意去掉重叠部分的重复商品）。
+const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或多张图片，可能是超市/商店的购物小票，也可能是餐厅、咖啡店、外卖等外出就餐的小票（多张时是同一张长小票分段拍摄，按顺序拼接，注意去掉重叠部分的重复商品）。
+没有小票时，用户也可能上传付款记录的截图：银行 App 里单笔交易的详情页、电子收据、订阅扣款邮件等。这类图片同样要识别，规则见下方"付款记录截图"。
 请把小票整理成结构化数据：
 
 - kind：小票类型。超市、商店购物填 "grocery"；餐厅、咖啡店、快餐店、奶茶店、外卖等餐饮消费填 "dining"；交通（公交充值、打车、加油、停车）、订阅会员、话费网费、水电燃气、医疗等其他支出填 "other"。
@@ -28,9 +29,11 @@ const SYSTEM_PROMPT = `你是消费小票识别助手。用户会上传一张或
   - 购物袋也算一条商品，归入"日用品"。不要把小计、合计、找零、支付方式、积分等当作商品。
   - 餐饮小票（kind 为 "dining"）：每道菜、每杯饮品各一条，品类从"外出就餐"大类里选（如越南粉、汉堡归"正餐"或"快餐小吃"，咖啡奶茶归"咖啡茶饮"）；name 用中文菜名，必要时保留原文菜名，如"牛肉河粉 Pho Bo"；generic_name 用菜品通用叫法，如"越南粉"、"拿铁"。
   - 其他支出小票（kind 为 "other"）：品类从"交通出行""生活服务"大类里选。
+  - 付款记录截图（没有商品明细）：store 填整理后易读的收款方名称（如 "ANTHROPIC* CLAUDE SU" 整理为 "Anthropic"，"Laundromatic" 保持原样），purchased_at 用交易日期时间，total 用扣款金额（取正数）。items 只放一条：name 写这笔钱的用途（如"Claude 订阅"、"自助洗衣"、"AT HOP 充值"），raw_name 填截图上的收款方原文，quantity 为 1，unit_price 和 amount 都等于扣款金额，按收款方判断 kind 和品类（超市填 grocery、餐厅填 dining、其他填 other）。warnings 写"这是付款记录，没有商品明细"，判断不出用途时再补一句请用户确认品类。截图里的账号、卡号、Particulars、Code、Reference 等信息一律不要输出。
   - 周末/节假日附加费（surcharge）、刷卡手续费、服务费、小费（tip）如果计入了实付金额，各单独列一条，归入"服务费小费"。GST 等已含在价格里的税不要单独列。
 - warnings：看不清、可能识别错或金额对不上的地方，用一两句中文说明；没有就留空字符串。
-- is_receipt：图片不是购物小票时设为 false，其他字段给空值即可。
+- is_receipt：图片既不是小票、也不是付款记录时设为 false，其他字段给空值即可。
+- multiple_transactions：截图是包含多笔交易的列表（如银行流水列表页）时设为 true，其他字段给空值即可；单张小票或单笔交易时为 false。
 
 可选品类（大类：小类）：
 ${categoryGuide}
@@ -40,9 +43,10 @@ ${categoryGuide}
 const RESULT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["is_receipt", "kind", "store", "purchased_at", "total", "discount", "items", "warnings"],
+  required: ["is_receipt", "multiple_transactions", "kind", "store", "purchased_at", "total", "discount", "items", "warnings"],
   properties: {
     is_receipt: { type: "boolean" },
+    multiple_transactions: { type: "boolean" },
     kind: { type: "string", enum: ["grocery", "dining", "other"] },
     store: { type: "string" },
     purchased_at: { type: "string", description: 'YYYY-MM-DD HH:MM，未知时为 ""' },
@@ -95,6 +99,7 @@ export async function recognizeReceipt(
 ): Promise<RecognizeResult> {
   if (process.env.RECOGNIZE_MOCK === "1") return mockResult(today);
   if (process.env.RECOGNIZE_MOCK === "dining") return mockDining(today);
+  if (process.env.RECOGNIZE_MOCK === "payment") return mockPayment(today);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
@@ -166,8 +171,11 @@ export async function recognizeReceipt(
     throw new RecognizeError("识别结果解析失败，请重试");
   }
 
+  if (data.multiple_transactions === true) {
+    throw new RecognizeError("这张截图里有多笔交易。请在银行 App 里点开其中一笔，对交易详情页截图后再上传", 422);
+  }
   if (data.is_receipt === false) {
-    throw new RecognizeError("没有在图片里找到购物小票", 422);
+    throw new RecognizeError("没有在图片里找到小票或付款记录", 422);
   }
 
   // 时间缺失时先用当前时间，确认页里可以修改
@@ -219,6 +227,22 @@ function mockDining(today: string): RecognizeResult {
       { raw_name: "Pho Bo (L)", generic_name: "越南粉", name: "牛肉河粉 Pho Bo（大）", category: "正餐", quantity: 1, unit: "份", unit_price: 19.5, amount: 19.5 },
       { raw_name: "Vietnamese Iced Coffee", generic_name: "越南咖啡", name: "越南冰咖啡", category: "咖啡茶饮", quantity: 1, unit: "杯", unit_price: 6.5, amount: 6.5 },
       { raw_name: "Card Surcharge", generic_name: "刷卡手续费", name: "刷卡手续费", category: "服务费小费", quantity: 1, unit: "", unit_price: 1.6, amount: 1.6 },
+    ],
+  };
+}
+
+function mockPayment(today: string): RecognizeResult {
+  return {
+    is_receipt: true,
+    kind: "other",
+    store: "Laundromatic（演示数据）",
+    purchased_at: today,
+    total: 4.04,
+    discount: 0,
+    note: "",
+    warnings: "这是付款记录，没有商品明细",
+    items: [
+      { raw_name: "Laundromatic", generic_name: "洗衣", name: "自助洗衣", category: "洗衣家政", quantity: 1, unit: "", unit_price: 4.04, amount: 4.04 },
     ],
   };
 }
